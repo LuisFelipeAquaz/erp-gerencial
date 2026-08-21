@@ -317,4 +317,14 @@ elif menu == "📊 Inicio (Dashboard)":
     if not df_v.empty:
         st.success("Sistema conectado. Usa el menú lateral para navegar por los módulos.")
     else:
+menu = st.sidebar.radio("Navegación Estratégica", [
+    "📊 Inicio (Dashboard)", 
+    "📥 Carga de Datos", 
+    "💰 1. Ventas & Analítica", 
+    "🏭 2. Producción & MRP", 
+    "⚖️ 3. Finanzas & Costos",
+    "📦 4. Inventario",
+    "🏬 5. Tienda Fiori (Unit Economics)",
+    "👥 6. Retención de Clientes" # <--- ¡NUEVA LÍNEA AQUÍ!
+])        
         st.warning("👈 Ve a la pestaña 'Carga de Datos' para arrancar el sistema.")
