@@ -75,17 +75,19 @@ if menu == "📥 Carga de Datos":
     st.markdown("### 1️⃣ Sube tu Matriz Principal")
     archivo_matriz = st.file_uploader("Arrastra tu archivo MATRIZ (Historial)", type=["xlsx", "xls"], key="matriz")
 
+    # LA SOLUCIÓN ESTÁ AQUÍ: Ahora la Matriz requiere que presiones un botón para procesarse
     if archivo_matriz:
-        try:
-            xls = pd.ExcelFile(archivo_matriz)
-            for h in st.session_state.dfs.keys():
-                if h in xls.sheet_names:
-                    df_cargado = pd.read_excel(xls, h)
-                    df_cargado.columns = df_cargado.columns.str.strip()
-                    st.session_state.dfs[h] = df_cargado
-            st.success("✅ Matriz cargada en memoria.")
-        except Exception as e:
-            st.error(f"Error cargando Matriz: {e}")
+        if st.button("Procesar Matriz", use_container_width=True):
+            try:
+                xls = pd.ExcelFile(archivo_matriz)
+                for h in st.session_state.dfs.keys():
+                    if h in xls.sheet_names:
+                        df_cargado = pd.read_excel(xls, h)
+                        df_cargado.columns = df_cargado.columns.str.strip()
+                        st.session_state.dfs[h] = df_cargado
+                st.success("✅ Matriz cargada en memoria exitosamente.")
+            except Exception as e:
+                st.error(f"Error cargando Matriz: {e}")
             
     st.markdown("---")
         
