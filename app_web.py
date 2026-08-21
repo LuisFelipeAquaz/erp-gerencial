@@ -229,7 +229,7 @@ elif menu == "💰 1. Ventas & Analítica":
     
     if empresa_activa == "Aquaz (Planta/Mayorista)":
         df = df_aquaz
-    elif empresa_activa == "Quinearoma (Tienda Fiori)":
+    elif empresa_activa == "Quimaroma (Tienda Fiori)":
         df = df_quima
     else:
         df = pd.concat([df_aquaz, df_quima], ignore_index=True)
