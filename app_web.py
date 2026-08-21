@@ -79,7 +79,6 @@ if menu == "📥 Carga de Datos":
     st.title("📥 Centro de Inyección de Datos (Holding)")
     st.write("Sube los archivos oficiales. El sistema cruzará costos y ventas automáticamente.")
     
-    # EL NUEVO BOTÓN INTELIGENTE ESTÁ AQUÍ
     if st.button(f"🗑️ Borrar datos de {empresa_activa}", type="primary"):
         if "Aquaz" in empresa_activa:
             st.session_state.dfs['Ventas'] = pd.DataFrame()
@@ -142,8 +141,8 @@ if menu == "📥 Carga de Datos":
                 if st.button("Procesar FACEL", use_container_width=True, type="primary"):
                     try:
                         xls_f = pd.ExcelFile(archivo_facel)
-                        # LA NUEVA ALARMA PARA DETECTAR HOJAS
-                        hojas_buscadas = ['FACTURAS', 'BOLETAS DE VENTAS', 'NOTAS DE VENTAS']
+                        # SOLUCIÓN: Agregamos 'VENTAS GENERAL' a la lista de búsqueda
+                        hojas_buscadas = ['FACTURAS', 'BOLETAS DE VENTAS', 'NOTAS DE VENTAS', 'VENTAS GENERAL']
                         lista_ventas = [pd.read_excel(xls_f, sheet_name=h, header=1) for h in hojas_buscadas if h in xls_f.sheet_names]
                         
                         if lista_ventas:
@@ -157,7 +156,13 @@ if menu == "📥 Carga de Datos":
                             df_v['Producto'] = df_bruto.get('PRODUCTO/SERVICIO', pd.Series(dtype=object)).fillna("SIN NOMBRE")
                             df_v['Cantidad'] = pd.to_numeric(df_bruto.get('CANTIDAD', pd.Series(dtype=float)), errors='coerce').fillna(0)
                             df_v['Precio_Venta'] = pd.to_numeric(df_bruto.get('PRECIO UNITARIO', pd.Series(dtype=float)), errors='coerce').fillna(0)
-                            df_v['Descuento'] = pd.to_numeric(df_bruto.get('DESCUENTO', pd.Series(dtype=float)), errors='coerce').fillna(0)
+                            
+                            # Validar que exista la columna DESCUENTO en Facel, si no, lo pasamos a 0
+                            if 'DESCUENTO' in df_bruto.columns:
+                                df_v['Descuento'] = pd.to_numeric(df_bruto['DESCUENTO'].replace('-', '0'), errors='coerce').fillna(0)
+                            else:
+                                df_v['Descuento'] = 0.0
+                                
                             df_v['Zona'] = "No registrada" 
                             
                             df_v['Costo_Unitario_Facel'] = pd.to_numeric(df_bruto.get('COSTO UNITARIO', pd.Series(dtype=float)), errors='coerce').fillna(0)
@@ -173,7 +178,7 @@ if menu == "📥 Carga de Datos":
                             st.session_state.dfs['Ventas'] = pd.concat([st.session_state.dfs['Ventas'], df_v], ignore_index=True)
                             st.success(f"¡{len(df_v)} ventas de Aquaz inyectadas con éxito!")
                         else:
-                            st.warning(f"⚠️ No se procesó nada. El sistema busca las hojas exactas: 'FACTURAS', 'BOLETAS DE VENTAS' o 'NOTAS DE VENTAS'. Las pestañas de tu archivo se llaman: {xls_f.sheet_names}")
+                            st.warning(f"⚠️ No se procesó nada. El sistema busca las hojas: {hojas_buscadas}. Las pestañas de tu archivo se llaman: {xls_f.sheet_names}")
                     except Exception as e:
                         st.error(f"Error procesando Facel: {e}")
 
