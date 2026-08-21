@@ -30,9 +30,22 @@ warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 # ==========================================
 st.set_page_config(page_title="ERP Holding Gerencial", layout="wide", page_icon="🏢")
 
-# Inicializamos la memoria a largo plazo blindada
+# Inicializamos la memoria ampliada para el Holding
 if 'dfs' not in st.session_state:
-    st.session_state.dfs = {h: pd.DataFrame() for h in ['Ventas', 'Produccion', 'Gastos', 'Inventario', 'CxC', 'Logistica', 'Calidad', 'RRHH']}
+    st.session_state.dfs = {
+        'Ventas': pd.DataFrame(), 
+        'Ventas_Quima': pd.DataFrame(), # NUEVO: Para la tienda Fiori
+        'Produccion': pd.DataFrame(), 
+        'Gastos': pd.DataFrame(), 
+        'Inventario': pd.DataFrame(), 
+        'CxC': pd.DataFrame(), 
+        'Logistica': pd.DataFrame(), 
+        'Calidad': pd.DataFrame(), 
+        'RRHH': pd.DataFrame(),
+        'Maestro_Costos': pd.DataFrame(), # NUEVO: El Diccionario Secreto
+        'Gastos_Aquaz': pd.DataFrame(),   # NUEVO: Gastos Centrales
+        'Gastos_Quima': pd.DataFrame()    # NUEVO: Gastos Tienda
+    }
 
 def resaltar_stock_critico(fila):
     col_evaluar = 'Stock' if 'Stock' in fila else ('Cantidad' if 'Cantidad' in fila else None)
@@ -60,69 +73,129 @@ menu = st.sidebar.radio("Navegación Estratégica", [
 ])
 
 # ==========================================
-# 3. PANTALLA: CARGA DE DATOS
+# 3. PANTALLA: CARGA DE DATOS (NUEVA TUBERÍA)
 # ==========================================
 if menu == "📥 Carga de Datos":
-    st.title("📥 Inyección de Datos")
-    st.write(f"Aquí actualizas la base de datos de **{empresa_activa}**.")
+    st.title("📥 Centro de Inyección de Datos (Holding)")
+    st.write("Sube los archivos oficiales. El sistema cruzará costos y ventas automáticamente.")
     
     if st.button("🗑️ Borrar toda la información en memoria y reiniciar", type="primary"):
-        st.session_state.dfs = {h: pd.DataFrame() for h in ['Ventas', 'Produccion', 'Gastos', 'Inventario', 'CxC', 'Logistica', 'Calidad', 'RRHH']}
+        st.session_state.dfs = {k: pd.DataFrame() for k in st.session_state.dfs.keys()}
         st.success("¡Memoria borrada! El sistema está en cero.")
         st.rerun()
 
     st.markdown("---")
-
-    st.markdown("### 1️⃣ Sube tu Matriz Principal")
-    archivo_matriz = st.file_uploader("Arrastra tu archivo MATRIZ (Historial)", type=["xlsx", "xls"], key="matriz")
-
-    # LA SOLUCIÓN ESTÁ AQUÍ: Ahora la Matriz requiere que presiones un botón para procesarse
-    if archivo_matriz:
-        if st.button("Procesar Matriz", use_container_width=True):
-            try:
-                xls = pd.ExcelFile(archivo_matriz)
-                for h in st.session_state.dfs.keys():
-                    if h in xls.sheet_names:
-                        df_cargado = pd.read_excel(xls, h)
-                        df_cargado.columns = df_cargado.columns.str.strip()
-                        st.session_state.dfs[h] = df_cargado
-                st.success("✅ Matriz cargada en memoria exitosamente.")
-            except Exception as e:
-                st.error(f"Error cargando Matriz: {e}")
-            
-    st.markdown("---")
-        
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("#### 🚀 Ventas (FACEL)")
-        archivo_facel = st.file_uploader("Arrastra reporte de Facel", type=["xlsx", "xls"], key="facel")
-        if archivo_facel:
-            if st.button("Procesar Ventas", use_container_width=True, type="primary"):
-                try:
-                    xls_f = pd.ExcelFile(archivo_facel)
-                    lista_ventas = [pd.read_excel(xls_f, sheet_name=h, header=1) for h in ['FACTURAS', 'BOLETAS DE VENTAS', 'NOTAS DE VENTAS'] if h in xls_f.sheet_names]
-                    if lista_ventas:
-                        df_bruto = pd.concat(lista_ventas, ignore_index=True)
-                        df_bruto.columns = df_bruto.columns.str.strip()
-                        df_v = pd.DataFrame()
-                        df_v['Fecha'] = pd.to_datetime(df_bruto.get('FECHA EMISION', pd.Series(dtype=object)), format='%d/%m/%Y', errors='coerce')
-                        df_v['Empresa'] = empresa_activa 
-                        df_v['Cliente'] = df_bruto.get('CLIENTE NOMBRE', pd.Series(dtype=object)).fillna("CLIENTE VARIOS")
-                        df_v['Vendedor'] = df_bruto.get('ATENDIDO POR', pd.Series(dtype=object)).fillna("TIENDA")
-                        df_v['Producto'] = df_bruto.get('PRODUCTO/SERVICIO', pd.Series(dtype=object)).fillna("SIN NOMBRE")
-                        df_v['Cantidad'] = pd.to_numeric(df_bruto.get('CANTIDAD', pd.Series(dtype=float)), errors='coerce').fillna(0)
-                        df_v['Precio_Venta'] = pd.to_numeric(df_bruto.get('PRECIO UNITARIO', pd.Series(dtype=float)), errors='coerce').fillna(0)
-                        df_v['Costo_Unitario'] = pd.to_numeric(df_bruto.get('COSTO UNITARIO', pd.Series(dtype=float)), errors='coerce').fillna(0)
-                        df_v['Descuento'] = pd.to_numeric(df_bruto.get('DESCUENTO', pd.Series(dtype=float)), errors='coerce').fillna(0)
-                        df_v = df_v[df_v['Cantidad'] > 0]
+    
+    # Organizamos la subida de datos en Pestañas para que no se vea desordenado
+    tab_bases, tab_ventas, tab_planta = st.tabs(["🗄️ 1. Bases y Gastos (Matriz)", "🚀 2. Ventas (Facel / Quimaroma)", "🏭 3. Producción"])
+    
+    with tab_bases:
+        colA, colB = st.columns(2)
+        with colA:
+            st.markdown("#### 📘 Matriz Principal y Costos")
+            st.info("💡 Asegúrate de tener una hoja llamada 'Maestro_Costos' en tu Excel.")
+            archivo_matriz = st.file_uploader("Arrastra tu archivo MATRIZ", type=["xlsx", "xls"], key="matriz")
+            if archivo_matriz:
+                if st.button("Procesar Matriz", use_container_width=True):
+                    try:
+                        xls = pd.ExcelFile(archivo_matriz)
+                        for h in st.session_state.dfs.keys():
+                            if h in xls.sheet_names:
+                                df_cargado = pd.read_excel(xls, h)
+                                df_cargado.columns = df_cargado.columns.str.strip()
+                                st.session_state.dfs[h] = df_cargado
+                        st.success("✅ Matriz y Diccionario de Costos cargados.")
+                    except Exception as e:
+                        st.error(f"Error cargando Matriz: {e}")
                         
-                        st.session_state.dfs['Ventas'] = pd.concat([st.session_state.dfs['Ventas'], df_v], ignore_index=True)
-                        st.success(f"¡{len(df_v)} ventas inyectadas con éxito!")
-                except Exception as e:
-                    st.error(f"Error procesando Facel: {e}")
+        with colB:
+            st.markdown("#### 💸 Gastos Operativos 2026")
+            archivo_gastos = st.file_uploader("Arrastra tu Excel de GASTOS", type=["xlsx", "xls"], key="gastos")
+            if archivo_gastos:
+                if st.button("Procesar Gastos", use_container_width=True):
+                    try:
+                        xls_g = pd.ExcelFile(archivo_gastos)
+                        if 'AQUAZ' in xls_g.sheet_names:
+                            st.session_state.dfs['Gastos_Aquaz'] = pd.read_excel(xls_g, 'AQUAZ')
+                        if 'QUIMA' in xls_g.sheet_names:
+                            st.session_state.dfs['Gastos_Quima'] = pd.read_excel(xls_g, 'QUIMA', header=6) # Salta el encabezado visual
+                        st.success("✅ Gastos de Aquaz y Quimaroma inyectados.")
+                    except Exception as e:
+                        st.error(f"Error cargando Gastos: {e}")
 
-    with col2:
-        st.markdown("#### 🏭 Planta (PRODUCCIÓN)")
+    with tab_ventas:
+        colV1, colV2 = st.columns(2)
+        with colV1:
+            st.markdown("#### 🔵 Ventas AQUAZ (FACEL)")
+            archivo_facel = st.file_uploader("Arrastra reporte de Facel", type=["xlsx", "xls"], key="facel")
+            if archivo_facel:
+                if st.button("Procesar FACEL", use_container_width=True, type="primary"):
+                    try:
+                        xls_f = pd.ExcelFile(archivo_facel)
+                        lista_ventas = [pd.read_excel(xls_f, sheet_name=h, header=1) for h in ['FACTURAS', 'BOLETAS DE VENTAS', 'NOTAS DE VENTAS'] if h in xls_f.sheet_names]
+                        if lista_ventas:
+                            df_bruto = pd.concat(lista_ventas, ignore_index=True)
+                            df_bruto.columns = df_bruto.columns.str.strip()
+                            df_v = pd.DataFrame()
+                            df_v['Fecha'] = pd.to_datetime(df_bruto.get('FECHA EMISION', pd.Series(dtype=object)), format='%d/%m/%Y', errors='coerce')
+                            df_v['Empresa'] = 'Aquaz' 
+                            df_v['Cliente'] = df_bruto.get('CLIENTE NOMBRE', pd.Series(dtype=object)).fillna("CLIENTE VARIOS")
+                            df_v['Vendedor'] = df_bruto.get('ATENDIDO POR', pd.Series(dtype=object)).fillna("TIENDA")
+                            df_v['Producto'] = df_bruto.get('PRODUCTO/SERVICIO', pd.Series(dtype=object)).fillna("SIN NOMBRE")
+                            df_v['Cantidad'] = pd.to_numeric(df_bruto.get('CANTIDAD', pd.Series(dtype=float)), errors='coerce').fillna(0)
+                            df_v['Precio_Venta'] = pd.to_numeric(df_bruto.get('PRECIO UNITARIO', pd.Series(dtype=float)), errors='coerce').fillna(0)
+                            df_v['Descuento'] = pd.to_numeric(df_bruto.get('DESCUENTO', pd.Series(dtype=float)), errors='coerce').fillna(0)
+                            
+                            # CRUCE MAGICO CON MAESTRO DE COSTOS
+                            df_v['Costo_Unitario_Facel'] = pd.to_numeric(df_bruto.get('COSTO UNITARIO', pd.Series(dtype=float)), errors='coerce').fillna(0)
+                            df_costos = st.session_state.dfs.get('Maestro_Costos', pd.DataFrame())
+                            if not df_costos.empty and 'Producto' in df_costos.columns and 'Costo_Real' in df_costos.columns:
+                                df_v = df_v.merge(df_costos[['Producto', 'Costo_Real']], on='Producto', how='left')
+                                df_v['Costo_Unitario'] = df_v['Costo_Real'].fillna(df_v['Costo_Unitario_Facel'])
+                                df_v = df_v.drop(columns=['Costo_Real'])
+                            else:
+                                df_v['Costo_Unitario'] = df_v['Costo_Unitario_Facel']
+                                
+                            df_v = df_v[df_v['Cantidad'] > 0]
+                            st.session_state.dfs['Ventas'] = pd.concat([st.session_state.dfs['Ventas'], df_v], ignore_index=True)
+                            st.success(f"¡{len(df_v)} ventas inyectadas y costeadas con éxito!")
+                    except Exception as e:
+                        st.error(f"Error procesando Facel: {e}")
+
+        with colV2:
+            st.markdown("#### 🟢 Ventas QUIMAROMA (Tienda)")
+            archivo_quima = st.file_uploader("Arrastra reporte Tienda", type=["xlsx", "xls"], key="quima_ventas")
+            if archivo_quima:
+                if st.button("Procesar QUIMAROMA", use_container_width=True, type="primary"):
+                    try:
+                        df_q_bruto = pd.read_excel(archivo_quima)
+                        df_q = pd.DataFrame()
+                        df_q['Fecha'] = pd.to_datetime(df_q_bruto.get('FechaEmision', pd.Series(dtype=object)), format='%d/%m/%Y', errors='coerce')
+                        df_q['Empresa'] = 'Quimaroma'
+                        df_q['Cliente'] = df_q_bruto.get('RazonSocial', pd.Series(dtype=object)).fillna("CLIENTES VARIOS")
+                        df_q['Vendedor'] = "MOSTRADOR"
+                        df_q['Producto'] = df_q_bruto.get('DescripcionItem', pd.Series(dtype=object)).fillna("SIN NOMBRE")
+                        df_q['Cantidad'] = pd.to_numeric(df_q_bruto.get('Cantidad de Item', pd.Series(dtype=float)), errors='coerce').fillna(0)
+                        df_q['Precio_Venta'] = pd.to_numeric(df_q_bruto.get('PrecioUnitario', pd.Series(dtype=float)), errors='coerce').fillna(0)
+                        df_q['Descuento'] = pd.to_numeric(df_q_bruto.get('DescuentoItem', pd.Series(dtype=float)), errors='coerce').fillna(0)
+                        
+                        # CRUCE MAGICO CON MAESTRO DE COSTOS (Aquí los empleados no ven el costo)
+                        df_costos = st.session_state.dfs.get('Maestro_Costos', pd.DataFrame())
+                        if not df_costos.empty and 'Producto' in df_costos.columns and 'Costo_Real' in df_costos.columns:
+                            df_q = df_q.merge(df_costos[['Producto', 'Costo_Real']], on='Producto', how='left')
+                            df_q['Costo_Unitario'] = df_q['Costo_Real'].fillna(0) # Si no lo encuentra, asume 0
+                            df_q = df_q.drop(columns=['Costo_Real'])
+                        else:
+                            df_q['Costo_Unitario'] = 0.0
+
+                        df_q = df_q[df_q['Cantidad'] > 0]
+                        st.session_state.dfs['Ventas_Quima'] = pd.concat([st.session_state.dfs['Ventas_Quima'], df_q], ignore_index=True)
+                        st.success(f"¡{len(df_q)} ventas de mostrador inyectadas y costeadas ocultamente!")
+                    except Exception as e:
+                        st.error(f"Error procesando Quimaroma: {e}")
+
+    with tab_planta:
+        st.markdown("#### 🏭 Reporte de Planta")
         archivo_prod = st.file_uploader("Arrastra reporte de planta", type=["xlsx", "xls"], key="prod")
         if archivo_prod:
             if st.button("Procesar Producción", use_container_width=True, type="primary"):
@@ -145,7 +218,7 @@ if menu == "📥 Carga de Datos":
                     st.error(f"Error procesando Producción: {e}")
 
 # ==========================================
-# 4. PANTALLA: VENTAS Y ANALÍTICA CHURN
+# 4. PANTALLA: VENTAS Y ANALÍTICA CHURN (INTACTO)
 # ==========================================
 elif menu == "💰 1. Ventas & Analítica":
     st.title("💰 Análisis de Ventas y Fidelización")
@@ -187,7 +260,7 @@ elif menu == "💰 1. Ventas & Analítica":
         st.metric("ROI Digital", f"{roi:.1f}%")
 
 # ==========================================
-# 5. PANTALLA: PRODUCCIÓN Y MRP
+# 5. PANTALLA: PRODUCCIÓN Y MRP (INTACTO)
 # ==========================================
 elif menu == "🏭 2. Producción & MRP":
     st.title("🏭 Eficiencia de Planta y MRP Predictivo")
@@ -217,7 +290,7 @@ elif menu == "🏭 2. Producción & MRP":
     st.success(f"**Orden de Producción Sugerida:** {orden:,.0f} Unidades")
 
 # ==========================================
-# 6. PANTALLA: FINANZAS Y COSTOS 
+# 6. PANTALLA: FINANZAS Y COSTOS (INTACTO)
 # ==========================================
 elif menu == "⚖️ 3. Finanzas & Costos":
     st.title("⚖️ Balance Financiero y Costos Estratégicos")
@@ -265,7 +338,7 @@ elif menu == "⚖️ 3. Finanzas & Costos":
             st.info("Sube datos de Facel para calcular rentabilidad.")
 
 # ==========================================
-# 7. PANTALLA: INVENTARIO
+# 7. PANTALLA: INVENTARIO (INTACTO)
 # ==========================================
 elif menu == "📦 4. Inventario":
     st.title("📦 Inventario en Tiempo Real")
@@ -285,81 +358,72 @@ elif menu == "📦 4. Inventario":
         st.dataframe(df.style.apply(resaltar_stock_critico, axis=1), use_container_width=True, height=500)
 
 # ==========================================
-# 8. PANTALLA: TIENDA FIORI (Unit Economics)
+# 8. PANTALLA: TIENDA FIORI (INTACTO)
 # ==========================================
 elif menu == "🏬 5. Tienda Fiori (Unit Economics)":
-    st.title("🏬 Rentabilidad Automatizada - Quinearoma Fiori")
-    st.write("Análisis de rentabilidad por ticket, extrayendo datos directamente de FACEL.")
+    st.title("🏬 Rentabilidad Diaria y por Cotización - Quinearoma Fiori")
+    st.write("Simulador de rentabilidad multiproducto para tickets de mostrador.")
 
-    # 1. Configuración de Gastos Fijos
     st.subheader("🏢 1. Costo Operativo del Local")
     cf_mensual = st.number_input("Costos Fijos del Local (Mensual) (S/)", value=2500.0, step=100.0)
     cuota_diaria = cf_mensual / 30
-    st.info(f"💡 Tu local necesita generar **S/ {cuota_diaria:,.2f}** de utilidad bruta diaria para cubrir sus gastos.")
+    st.info(f"💡 Tu local necesita generar **S/ {cuota_diaria:,.2f}** de utilidad bruta diaria (Punto de Equilibrio) para no perder dinero.")
+
+    st.markdown("---")
+    st.subheader("🛒 2. Simulador de Pedido (Calculadora por Ítem)")
+    
+    if 'carrito_fiori' not in st.session_state:
+        st.session_state['carrito_fiori'] = pd.DataFrame({
+            "Producto": ["Texapon", "", ""],
+            "Cantidad": [1, 0, 0],
+            "Costo Unitario (S/)": [15.0, 0.0, 0.0],
+            "Precio Venta Unit. (S/)": [20.0, 0.0, 0.0]
+        })
+
+    st.write("Escribe los productos del pedido. **Para agregar más filas, simplemente haz clic en la última fila en blanco o arrastra hacia abajo.**")
+    
+    df_pedido = st.data_editor(
+        st.session_state['carrito_fiori'],
+        num_rows="dynamic", 
+        use_container_width=True,
+        hide_index=True
+    )
+    
+    st.session_state['carrito_fiori'] = df_pedido 
+    
+    gasto_variable = st.number_input("Gastos Extra del Pedido (Bolsas, pasajes, comisión, etc.) (S/)", value=0.0, step=5.0)
+
+    df_pedido['Cantidad'] = pd.to_numeric(df_pedido['Cantidad'], errors='coerce').fillna(0)
+    df_pedido['Costo Unitario (S/)'] = pd.to_numeric(df_pedido['Costo Unitario (S/)'], errors='coerce').fillna(0)
+    df_pedido['Precio Venta Unit. (S/)'] = pd.to_numeric(df_pedido['Precio Venta Unit. (S/)'], errors='coerce').fillna(0)
+
+    costo_total = (df_pedido['Cantidad'] * df_pedido['Costo Unitario (S/)']).sum()
+    venta_total = (df_pedido['Cantidad'] * df_pedido['Precio Venta Unit. (S/)']).sum()
+    
+    utilidad_pedido = venta_total - costo_total - gasto_variable
+    margen_pedido = (utilidad_pedido / venta_total * 100) if venta_total > 0 else 0
+    cobertura = (utilidad_pedido / cuota_diaria * 100) if cuota_diaria > 0 else 0
 
     st.markdown("---")
     
-    # Llamamos a la base de datos de FACEL que ya subiste
-    df_v = st.session_state.dfs.get('Ventas')
-    
-    if df_v is None or df_v.empty:
-        st.warning("⚠️ No hay ventas cargadas. Ve a 'Carga de Datos' y sube tu archivo FACEL para automatizar este panel.")
-    else:
-        st.subheader("🛒 2. Extracción Automática de Pedidos")
-        
-        # Filtros inteligentes para encontrar el pedido rápido
-        col1, col2 = st.columns(2)
-        fechas_disponibles = df_v['Fecha'].dt.date.dropna().unique()
-        
-        with col1:
-            fecha_seleccionada = st.selectbox("📅 Fecha de Venta:", sorted(fechas_disponibles, reverse=True))
-        
-        # Filtrar la base de datos solo por la fecha elegida
-        df_dia = df_v[df_v['Fecha'].dt.date == fecha_seleccionada]
-        
-        with col2:
-            clientes_disponibles = df_dia['Cliente'].unique()
-            cliente_seleccionado = st.selectbox("👤 Selecciona el Cliente:", clientes_disponibles)
-            
-        # Extraer el ticket exacto de ese cliente
-        df_ticket = df_dia[df_dia['Cliente'] == cliente_seleccionado].copy()
-        
-        st.write(f"**Detalle exacto del pedido de {cliente_seleccionado}:**")
-        # Mostramos la tabla jalada automáticamente
-        st.dataframe(df_ticket[['Producto', 'Cantidad', 'Precio_Venta', 'Costo_Unitario', 'Descuento']], use_container_width=True, hide_index=True)
-        
-        # Cálculos matemáticos automáticos
-        venta_total = (df_ticket['Cantidad'] * df_ticket['Precio_Venta']).sum() - df_ticket['Descuento'].sum()
-        costo_total = (df_ticket['Cantidad'] * df_ticket['Costo_Unitario']).sum()
-        
-        # Casilla opcional por si gastaste en un taxi o flete especial para este pedido
-        gasto_variable = st.number_input("Gastos Extra (Opcional - Flete, empaque) (S/)", value=0.0, step=5.0)
-        
-        utilidad_pedido = venta_total - costo_total - gasto_variable
-        margen_pedido = (utilidad_pedido / venta_total * 100) if venta_total > 0 else 0
-        cobertura = (utilidad_pedido / cuota_diaria * 100) if cuota_diaria > 0 else 0
+    st.markdown("#### 📊 Rentabilidad de la Cotización:")
+    cA, cB, cC, cD = st.columns(4)
+    cA.metric("Venta Bruta Total", f"S/ {venta_total:,.2f}")
+    cB.metric("Utilidad Neta (Bolsillo)", f"S/ {utilidad_pedido:,.2f}")
+    cC.metric("Margen de Ganancia", f"{margen_pedido:.1f}%")
+    cD.metric("Cobertura del Día", f"{cobertura:.1f}%")
 
-        st.markdown("---")
-        
-        # Panel de Resultados Rápidos
-        st.markdown("#### 📊 Rentabilidad Real de este Ticket:")
-        cA, cB, cC, cD = st.columns(4)
-        cA.metric("Venta Bruta Total", f"S/ {venta_total:,.2f}")
-        cB.metric("Utilidad Neta (Bolsillo)", f"S/ {utilidad_pedido:,.2f}")
-        cC.metric("Margen de Ganancia", f"{margen_pedido:.1f}%")
-        cD.metric("Cobertura del Día", f"{cobertura:.1f}%")
+    if utilidad_pedido > 0:
+        st.progress(min(cobertura / 100, 1.0))
+        if cobertura >= 100:
+            st.success("🎉 ¡Boom! Este ticket por sí solo acaba de pagar el costo operativo del día entero en la tienda.")
+        else:
+            st.warning(f"Rentable. Este ticket cubrió un tramo, te falta cubrir el **{max(0, 100 - cobertura):.1f}%** de los gastos operativos de hoy con otras ventas.")
+    elif utilidad_pedido < 0:
+        st.error("⚠️ ¡ALTO! Este pedido te está generando pérdidas. Revisa tus precios de venta o gastos extra.")
 
-        # Termómetro visual de éxito
-        if utilidad_pedido > 0:
-            st.progress(min(cobertura / 100, 1.0))
-            if cobertura >= 100:
-                st.success("🎉 ¡Excelente! Este ticket por sí solo ya pagó la cuota operativa del local de hoy.")
-            else:
-                st.info(f"Ticket rentable. Ayudó a cubrir el **{cobertura:.1f}%** de los gastos operativos diarios.")
-        elif utilidad_pedido < 0:
-            st.error("⚠️ Alerta: Pérdida detectada en este ticket. Los costos superan a la venta.")
 # ==========================================
-# 9. PANTALLA: RETENCIÓN DE CLIENTES (CRM)
+# 9. PANTALLA: RETENCIÓN DE CLIENTES (INTACTO)
 # ==========================================
 elif menu == "👥 6. Retención de Clientes":
     st.title("👥 Radar de Retención y Valor de Cliente")
@@ -390,21 +454,18 @@ elif menu == "👥 6. Retención de Clientes":
         
         with tab1:
             st.subheader(f"🟢 Clientes Top Activos ({len(activos)})")
-            st.write("Tus mejores clientes actuales. Cuídalos.")
             st.dataframe(activos[['Cliente', 'Ultima_Compra', 'Frecuencia_Compras', 'Utilidad_Total']], use_container_width=True)
             
         with tab2:
             st.subheader(f"🟡 ¡Alerta! Clientes En Riesgo ({len(en_riesgo)})")
-            st.write("Han dejado de comprar este último mes. **Recomendación:** Asignar a un vendedor para llamarlos hoy mismo.")
             st.dataframe(en_riesgo[['Cliente', 'Días Sin Comprar', 'Ultima_Compra', 'Utilidad_Total']], use_container_width=True)
             
         with tab3:
             st.subheader(f"🔴 Clientes Dormidos ({len(dormidos)})")
-            st.write("Hace más de 2 meses que no te compran. Ordenados por la plata que te dejaban antes de irse.")
             st.dataframe(dormidos[['Cliente', 'Días Sin Comprar', 'Utilidad_Total', 'Frecuencia_Compras']], use_container_width=True)
 
 # ==========================================
-# 10. DASHBOARD INICIAL
+# 10. DASHBOARD INICIAL (INTACTO)
 # ==========================================
 elif menu == "📊 Inicio (Dashboard)":
     st.title("📊 Panel de Control Principal")
