@@ -288,76 +288,76 @@ elif menu == "📦 4. Inventario":
 # 8. PANTALLA: TIENDA FIORI (Unit Economics)
 # ==========================================
 elif menu == "🏬 5. Tienda Fiori (Unit Economics)":
-    st.title("🏬 Rentabilidad Diaria y por Cotización - Quinearoma Fiori")
-    st.write("Simulador de rentabilidad multiproducto para tickets de mostrador.")
+    st.title("🏬 Rentabilidad Automatizada - Quinearoma Fiori")
+    st.write("Análisis de rentabilidad por ticket, extrayendo datos directamente de FACEL.")
 
     # 1. Configuración de Gastos Fijos
     st.subheader("🏢 1. Costo Operativo del Local")
     cf_mensual = st.number_input("Costos Fijos del Local (Mensual) (S/)", value=2500.0, step=100.0)
     cuota_diaria = cf_mensual / 30
-    st.info(f"💡 Tu local necesita generar **S/ {cuota_diaria:,.2f}** de utilidad bruta diaria (Punto de Equilibrio) para no perder dinero.")
-
-    st.markdown("---")
-
-    # 2. Análisis del Pedido Multiproducto
-    st.subheader("🛒 2. Simulador de Pedido (Calculadora por Ítem)")
-    
-    # Inicializar el "carrito" en la memoria si no existe
-    if 'carrito_fiori' not in st.session_state:
-        st.session_state['carrito_fiori'] = pd.DataFrame({
-            "Producto": ["Texapon", "", ""],
-            "Cantidad": [1, 0, 0],
-            "Costo Unitario (S/)": [15.0, 0.0, 0.0],
-            "Precio Venta Unit. (S/)": [20.0, 0.0, 0.0]
-        })
-
-    st.write("Escribe los productos del pedido. **Para agregar más filas, simplemente haz clic en la última fila en blanco o arrastra hacia abajo.**")
-    
-    # Tabla editable incrustada
-    df_pedido = st.data_editor(
-        st.session_state['carrito_fiori'],
-        num_rows="dynamic", # Esto permite agregar o borrar ítems a voluntad
-        use_container_width=True,
-        hide_index=True
-    )
-    
-    # Guardar los cambios automáticamente
-    st.session_state['carrito_fiori'] = df_pedido 
-    
-    gasto_variable = st.number_input("Gastos Extra del Pedido (Bolsas, pasajes, comisión, etc.) (S/)", value=0.0, step=5.0)
-
-    # Convertir datos a números puros para evitar errores si dejas celdas vacías
-    df_pedido['Cantidad'] = pd.to_numeric(df_pedido['Cantidad'], errors='coerce').fillna(0)
-    df_pedido['Costo Unitario (S/)'] = pd.to_numeric(df_pedido['Costo Unitario (S/)'], errors='coerce').fillna(0)
-    df_pedido['Precio Venta Unit. (S/)'] = pd.to_numeric(df_pedido['Precio Venta Unit. (S/)'], errors='coerce').fillna(0)
-
-    # Cálculos matemáticos del ticket completo
-    costo_total = (df_pedido['Cantidad'] * df_pedido['Costo Unitario (S/)']).sum()
-    venta_total = (df_pedido['Cantidad'] * df_pedido['Precio Venta Unit. (S/)']).sum()
-    
-    utilidad_pedido = venta_total - costo_total - gasto_variable
-    margen_pedido = (utilidad_pedido / venta_total * 100) if venta_total > 0 else 0
-    cobertura = (utilidad_pedido / cuota_diaria * 100) if cuota_diaria > 0 else 0
+    st.info(f"💡 Tu local necesita generar **S/ {cuota_diaria:,.2f}** de utilidad bruta diaria para cubrir sus gastos.")
 
     st.markdown("---")
     
-    # 3. Panel de Resultados Rápidos
-    st.markdown("#### 📊 Rentabilidad de la Cotización:")
-    cA, cB, cC, cD = st.columns(4)
-    cA.metric("Venta Bruta Total", f"S/ {venta_total:,.2f}")
-    cB.metric("Utilidad Neta (Bolsillo)", f"S/ {utilidad_pedido:,.2f}")
-    cC.metric("Margen de Ganancia", f"{margen_pedido:.1f}%")
-    cD.metric("Cobertura del Día", f"{cobertura:.1f}%")
+    # Llamamos a la base de datos de FACEL que ya subiste
+    df_v = st.session_state.dfs.get('Ventas')
+    
+    if df_v is None or df_v.empty:
+        st.warning("⚠️ No hay ventas cargadas. Ve a 'Carga de Datos' y sube tu archivo FACEL para automatizar este panel.")
+    else:
+        st.subheader("🛒 2. Extracción Automática de Pedidos")
+        
+        # Filtros inteligentes para encontrar el pedido rápido
+        col1, col2 = st.columns(2)
+        fechas_disponibles = df_v['Fecha'].dt.date.dropna().unique()
+        
+        with col1:
+            fecha_seleccionada = st.selectbox("📅 Fecha de Venta:", sorted(fechas_disponibles, reverse=True))
+        
+        # Filtrar la base de datos solo por la fecha elegida
+        df_dia = df_v[df_v['Fecha'].dt.date == fecha_seleccionada]
+        
+        with col2:
+            clientes_disponibles = df_dia['Cliente'].unique()
+            cliente_seleccionado = st.selectbox("👤 Selecciona el Cliente:", clientes_disponibles)
+            
+        # Extraer el ticket exacto de ese cliente
+        df_ticket = df_dia[df_dia['Cliente'] == cliente_seleccionado].copy()
+        
+        st.write(f"**Detalle exacto del pedido de {cliente_seleccionado}:**")
+        # Mostramos la tabla jalada automáticamente
+        st.dataframe(df_ticket[['Producto', 'Cantidad', 'Precio_Venta', 'Costo_Unitario', 'Descuento']], use_container_width=True, hide_index=True)
+        
+        # Cálculos matemáticos automáticos
+        venta_total = (df_ticket['Cantidad'] * df_ticket['Precio_Venta']).sum() - df_ticket['Descuento'].sum()
+        costo_total = (df_ticket['Cantidad'] * df_ticket['Costo_Unitario']).sum()
+        
+        # Casilla opcional por si gastaste en un taxi o flete especial para este pedido
+        gasto_variable = st.number_input("Gastos Extra (Opcional - Flete, empaque) (S/)", value=0.0, step=5.0)
+        
+        utilidad_pedido = venta_total - costo_total - gasto_variable
+        margen_pedido = (utilidad_pedido / venta_total * 100) if venta_total > 0 else 0
+        cobertura = (utilidad_pedido / cuota_diaria * 100) if cuota_diaria > 0 else 0
 
-    # Termómetro visual
-    if utilidad_pedido > 0:
-        st.progress(min(cobertura / 100, 1.0))
-        if cobertura >= 100:
-            st.success("🎉 ¡Boom! Este ticket por sí solo acaba de pagar el costo operativo del día entero en la tienda.")
-        else:
-            st.warning(f"Rentable. Este ticket cubrió un tramo, te falta cubrir el **{max(0, 100 - cobertura):.1f}%** de los gastos operativos de hoy con otras ventas.")
-    elif utilidad_pedido < 0:
-        st.error("⚠️ ¡ALTO! Este pedido te está generando pérdidas. Revisa tus precios de venta o gastos extra.")
+        st.markdown("---")
+        
+        # Panel de Resultados Rápidos
+        st.markdown("#### 📊 Rentabilidad Real de este Ticket:")
+        cA, cB, cC, cD = st.columns(4)
+        cA.metric("Venta Bruta Total", f"S/ {venta_total:,.2f}")
+        cB.metric("Utilidad Neta (Bolsillo)", f"S/ {utilidad_pedido:,.2f}")
+        cC.metric("Margen de Ganancia", f"{margen_pedido:.1f}%")
+        cD.metric("Cobertura del Día", f"{cobertura:.1f}%")
+
+        # Termómetro visual de éxito
+        if utilidad_pedido > 0:
+            st.progress(min(cobertura / 100, 1.0))
+            if cobertura >= 100:
+                st.success("🎉 ¡Excelente! Este ticket por sí solo ya pagó la cuota operativa del local de hoy.")
+            else:
+                st.info(f"Ticket rentable. Ayudó a cubrir el **{cobertura:.1f}%** de los gastos operativos diarios.")
+        elif utilidad_pedido < 0:
+            st.error("⚠️ Alerta: Pérdida detectada en este ticket. Los costos superan a la venta.")
 # ==========================================
 # 9. PANTALLA: RETENCIÓN DE CLIENTES (CRM)
 # ==========================================
