@@ -1,19 +1,10 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+import os
 import warnings
 
-warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
-
-# ==========================================
-# 1. CONFIGURACIÓN DE PÁGINA
-# ==========================================
-st.set_page_config(page_title="ERP Holding Gerencial", layout="wide", initial_sidebar_state="expanded")
-
-# ==========================================
-# 2. SISTEMA DE SEGURIDAD
-# ==========================================
+# --- INICIO DE SISTEMA DE SEGURIDAD ---
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
 
@@ -28,132 +19,91 @@ if not st.session_state["autenticado"]:
             st.rerun() 
         else:
             st.error("😕 Usuario o contraseña incorrectos")
+    
     st.stop()
+# --- FIN DE SISTEMA DE SEGURIDAD ---
+
+warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
 # ==========================================
-# 3. MEMORIA DEL SISTEMA (CEREBRO)
+# 1. CONFIGURACIÓN Y MEMORIA DEL SISTEMA
 # ==========================================
-hojas_base = ['Ventas', 'Produccion', 'Gastos', 'Inventario', 'CxC', 'Logistica', 'Calidad', 'RRHH', 'Metas_Vendedores']
+st.set_page_config(page_title="ERP Holding Gerencial", layout="wide", page_icon="🏢")
 
+# Inicializamos la memoria a largo plazo blindada
 if 'dfs' not in st.session_state:
-    st.session_state['dfs'] = {h: pd.DataFrame() for h in hojas_base}
-if 'empresa_activa' not in st.session_state:
-    st.session_state['empresa_activa'] = "Aquaz Perú SAC"
-if 'dias_periodo' not in st.session_state:
-    st.session_state['dias_periodo'] = 30
+    st.session_state.dfs = {h: pd.DataFrame() for h in ['Ventas', 'Produccion', 'Gastos', 'Inventario', 'CxC', 'Logistica', 'Calidad', 'RRHH']}
+
+def resaltar_stock_critico(fila):
+    col_evaluar = 'Stock' if 'Stock' in fila else ('Cantidad' if 'Cantidad' in fila else None)
+    if col_evaluar:
+        valor = pd.to_numeric(fila[col_evaluar], errors='coerce')
+        if pd.notna(valor) and valor < 0:
+            return ['background-color: #fee2e2; color: #991b1b; font-weight: bold'] * len(fila)
+    return [''] * len(fila)
 
 # ==========================================
-# 4. BARRA LATERAL (MENÚ Y FILTROS)
+# 2. BARRA LATERAL (SIDEBAR MULTISOCIEDAD)
 # ==========================================
-with st.sidebar:
-    st.title("⚙️ Panel de Control")
-    st.session_state['empresa_activa'] = st.selectbox("ENTORNO DE TRABAJO:", ["Aquaz Perú SAC", "Real Química", "Quimaroma", "Otra..."])
-    
-    st.markdown("---")
-    st.markdown("**📅 FILTRO DE TIEMPO**")
-    filtro_tiempo = st.selectbox("Rápido:", ["Todo el Historial", "Últimos 15 Días", "Mes Actual", "Rango Personalizado"])
-    
-    fecha_desde, fecha_hasta = None, None
-    if filtro_tiempo == "Rango Personalizado":
-        col1, col2 = st.columns(2)
-        with col1:
-            fecha_desde = st.date_input("Desde")
-        with col2:
-            fecha_hasta = st.date_input("Hasta")
-            
-    st.markdown("---")
-    st.markdown("**Navegación Estratégica**")
-    menu = st.radio("", [
-        "🏠 Inicio (Dashboard)", 
-        "📥 Carga de Datos", 
-        "💰 1. Ventas & Analítica",
-        "🏭 2. Producción & MRP",
-        "📈 3. Finanzas & Costos",
-        "📦 4. Inventario",
-        "🏪 5. Tienda Fiori (Unit Economics)"
-    ])
+st.sidebar.title("⚙️ Panel de Control")
+empresa_activa = st.sidebar.selectbox("🏢 ENTORNO DE TRABAJO:", ["Aquaz (Planta/Mayorista)", "Quinearoma (Tienda Fiori)", "Consolidado Grupo"])
+st.sidebar.markdown("---")
+menu = st.sidebar.radio("Navegación Estratégica", [
+    "📊 Inicio (Dashboard)", 
+    "📥 Carga de Datos", 
+    "💰 1. Ventas & Analítica", 
+    "🏭 2. Producción & MRP", 
+    "⚖️ 3. Finanzas & Costos",
+    "📦 4. Inventario",
+    "🏬 5. Tienda Fiori (Unit Economics)"
+])
 
 # ==========================================
-# 5. LÓGICA DE FILTRADO GLOBAL
+# 3. PANTALLA: CARGA DE DATOS
 # ==========================================
-dfs_filtrados = {h: pd.DataFrame() for h in hojas_base}
-hoy = pd.Timestamp.today()
-
-if filtro_tiempo == "Todo el Historial": 
-    fecha_limite = pd.Timestamp.min
-    st.session_state['dias_periodo'] = 30 # Por defecto
-elif filtro_tiempo == "Últimos 15 Días": 
-    fecha_limite = hoy - pd.Timedelta(days=15)
-    st.session_state['dias_periodo'] = 15
-elif filtro_tiempo == "Mes Actual": 
-    fecha_limite = hoy.replace(day=1)
-    st.session_state['dias_periodo'] = max(1, (hoy - fecha_limite).days + 1)
-
-for nombre_hoja, df in st.session_state['dfs'].items():
-    if not df.empty and 'Fecha' in df.columns:
-        df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
-        if filtro_tiempo == "Rango Personalizado" and fecha_desde and fecha_hasta:
-            f_desde = pd.to_datetime(fecha_desde)
-            f_hasta = pd.to_datetime(fecha_hasta) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-            mask = (df['Fecha'] >= f_desde) & (df['Fecha'] <= f_hasta)
-            st.session_state['dias_periodo'] = max(1, (f_hasta - f_desde).days)
-        else:
-            mask = df['Fecha'] >= fecha_limite
-        dfs_filtrados[nombre_hoja] = df[mask].copy()
-    else:
-        dfs_filtrados[nombre_hoja] = df.copy()
-
-# ==========================================
-# 6. RUTAS DE LAS PESTAÑAS
-# ==========================================
-
-# --- INICIO ---
-if menu == "🏠 Inicio (Dashboard)":
-    st.title("📊 Panel de Control Principal")
-    st.markdown(f"Resumen gerencial de **{st.session_state['empresa_activa']}**.")
-    st.info("👈 Ve a la pestaña 'Carga de Datos' para inyectar tu Matriz y reportes.")
-
-# --- CARGA DE DATOS ---
-elif menu == "📥 Carga de Datos":
+if menu == "📥 Carga de Datos":
     st.title("📥 Inyección de Datos")
+    st.write(f"Aquí actualizas la base de datos de **{empresa_activa}**.")
     
     if st.button("🗑️ Borrar toda la información en memoria y reiniciar", type="primary"):
-        st.session_state['dfs'] = {h: pd.DataFrame() for h in hojas_base}
+        st.session_state.dfs = {h: pd.DataFrame() for h in ['Ventas', 'Produccion', 'Gastos', 'Inventario', 'CxC', 'Logistica', 'Calidad', 'RRHH']}
         st.success("¡Memoria borrada! El sistema está en cero.")
         st.rerun()
 
     st.markdown("---")
-    st.subheader("1️⃣ Sube tu Matriz Principal")
-    archivo_matriz = st.file_uploader("Arrastra tu archivo MATRIZ (Historial)", type=["xlsx", "xls"], key="up_matriz")
-    
-    if archivo_matriz is not None:
+
+    st.markdown("### 1️⃣ Sube tu Matriz Principal")
+    archivo_matriz = st.file_uploader("Arrastra tu archivo MATRIZ (Historial)", type=["xlsx", "xls"], key="matriz")
+
+    if archivo_matriz:
         try:
             xls = pd.ExcelFile(archivo_matriz)
-            for h in st.session_state['dfs'].keys():
+            for h in st.session_state.dfs.keys():
                 if h in xls.sheet_names:
                     df_cargado = pd.read_excel(xls, h)
-                    if df_cargado is not None:
-                        df_cargado.columns = df_cargado.columns.str.strip()
-                        st.session_state['dfs'][h] = df_cargado
-            st.success("✅ Matriz cargada en memoria exitosamente.")
+                    df_cargado.columns = df_cargado.columns.str.strip()
+                    st.session_state.dfs[h] = df_cargado
+            st.success("✅ Matriz cargada en memoria.")
         except Exception as e:
-            st.error(f"Error al leer Matriz: {e}")
-
+            st.error(f"Error cargando Matriz: {e}")
+            
+    st.markdown("---")
+        
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("🚀 Ventas (FACEL)")
-        archivo_ventas = st.file_uploader("Arrastra reporte de Facel", type=["xlsx", "xls"], key="up_ventas")
-        if st.button("Procesar Ventas FACEL"):
-            if archivo_ventas is not None:
+        st.markdown("#### 🚀 Ventas (FACEL)")
+        archivo_facel = st.file_uploader("Arrastra reporte de Facel", type=["xlsx", "xls"], key="facel")
+        if archivo_facel:
+            if st.button("Procesar Ventas", use_container_width=True, type="primary"):
                 try:
-                    xls_facel = pd.ExcelFile(archivo_ventas)
-                    lista_ventas = [pd.read_excel(xls_facel, sheet_name=h, header=1) for h in ['FACTURAS', 'BOLETAS DE VENTAS', 'NOTAS DE VENTAS'] if h in xls_facel.sheet_names]
+                    xls_f = pd.ExcelFile(archivo_facel)
+                    lista_ventas = [pd.read_excel(xls_f, sheet_name=h, header=1) for h in ['FACTURAS', 'BOLETAS DE VENTAS', 'NOTAS DE VENTAS'] if h in xls_f.sheet_names]
                     if lista_ventas:
                         df_bruto = pd.concat(lista_ventas, ignore_index=True)
                         df_bruto.columns = df_bruto.columns.str.strip()
                         df_v = pd.DataFrame()
                         df_v['Fecha'] = pd.to_datetime(df_bruto.get('FECHA EMISION', pd.Series(dtype=object)), format='%d/%m/%Y', errors='coerce')
-                        df_v['Empresa'] = st.session_state['empresa_activa']
+                        df_v['Empresa'] = empresa_activa 
                         df_v['Cliente'] = df_bruto.get('CLIENTE NOMBRE', pd.Series(dtype=object)).fillna("CLIENTE VARIOS")
                         df_v['Vendedor'] = df_bruto.get('ATENDIDO POR', pd.Series(dtype=object)).fillna("TIENDA")
                         df_v['Producto'] = df_bruto.get('PRODUCTO/SERVICIO', pd.Series(dtype=object)).fillna("SIN NOMBRE")
@@ -163,200 +113,206 @@ elif menu == "📥 Carga de Datos":
                         df_v['Descuento'] = pd.to_numeric(df_bruto.get('DESCUENTO', pd.Series(dtype=float)), errors='coerce').fillna(0)
                         df_v = df_v[df_v['Cantidad'] > 0]
                         
-                        st.session_state['dfs']['Ventas'] = pd.concat([st.session_state['dfs']['Ventas'], df_v], ignore_index=True)
-                        st.success(f"¡Se inyectaron {len(df_v)} ventas nuevas!")
+                        st.session_state.dfs['Ventas'] = pd.concat([st.session_state.dfs['Ventas'], df_v], ignore_index=True)
+                        st.success(f"¡{len(df_v)} ventas inyectadas con éxito!")
                 except Exception as e:
-                    st.error(f"Error procesando FACEL: {e}")
+                    st.error(f"Error procesando Facel: {e}")
 
     with col2:
-        st.subheader("🏭 Planta (PRODUCCIÓN)")
-        archivo_prod = st.file_uploader("Arrastra reporte de planta", type=["xlsx", "xls"], key="up_prod")
-        if st.button("Procesar Producción"):
-            if archivo_prod is not None:
+        st.markdown("#### 🏭 Planta (PRODUCCIÓN)")
+        archivo_prod = st.file_uploader("Arrastra reporte de planta", type=["xlsx", "xls"], key="prod")
+        if archivo_prod:
+            if st.button("Procesar Producción", use_container_width=True, type="primary"):
                 try:
-                    df_bruto_p = pd.read_excel(archivo_prod)
-                    df_bruto_p.columns = df_bruto_p.columns.str.strip()
+                    df_bruto = pd.read_excel(archivo_prod)
+                    df_bruto.columns = df_bruto.columns.str.strip()
                     df_p = pd.DataFrame()
-                    df_p['Fecha'] = pd.to_datetime(df_bruto_p.get('Fecha', pd.Series(dtype=object)), errors='coerce')
-                    df_p['Empresa'] = st.session_state['empresa_activa']
-                    df_p['Lote'] = df_bruto_p.get('Número de Lote (o de Orden)', pd.Series(dtype=object)).fillna("S/L")
-                    df_p['Producto'] = df_bruto_p.get('Producto Fabricado', pd.Series(dtype=object)).fillna("SIN NOMBRE")
-                    df_p['Cantidad_Producida'] = pd.to_numeric(df_bruto_p.get('Cantidad Producida', pd.Series(dtype=float)), errors='coerce').fillna(0)
-                    df_p['Costo_Materia_Prima'] = pd.to_numeric(df_bruto_p.get('Costo de Materia Prima', pd.Series(dtype=float)), errors='coerce').fillna(0)
-                    df_p['Merma_Soles'] = pd.to_numeric(df_bruto_p.get('Merma', pd.Series(dtype=float)), errors='coerce').fillna(0)
-                    df_p['Operario'] = df_bruto_p.get('Operario / Responsable', pd.Series(dtype=object)).fillna("No especificado")
-                    
-                    st.session_state['dfs']['Produccion'] = pd.concat([st.session_state['dfs']['Produccion'], df_p], ignore_index=True)
-                    st.success(f"¡Se inyectaron {len(df_p)} registros de Planta!")
+                    df_p['Fecha'] = pd.to_datetime(df_bruto.get('Fecha', pd.Series(dtype=object)), errors='coerce')
+                    df_p['Empresa'] = empresa_activa
+                    df_p['Lote'] = df_bruto.get('Número de Lote (o de Orden)', pd.Series(dtype=object)).fillna("S/L")
+                    df_p['Producto'] = df_bruto.get('Producto Fabricado', pd.Series(dtype=object)).fillna("SIN NOMBRE")
+                    df_p['Cantidad_Producida'] = pd.to_numeric(df_bruto.get('Cantidad Producida', pd.Series(dtype=float)), errors='coerce').fillna(0)
+                    df_p['Costo_Materia_Prima'] = pd.to_numeric(df_bruto.get('Costo de Materia Prima', pd.Series(dtype=float)), errors='coerce').fillna(0)
+                    df_p['Merma_Soles'] = pd.to_numeric(df_bruto.get('Merma', pd.Series(dtype=float)), errors='coerce').fillna(0)
+                    df_p['Operario'] = df_bruto.get('Operario / Responsable', pd.Series(dtype=object)).fillna("No especificado")
+                        
+                    st.session_state.dfs['Produccion'] = pd.concat([st.session_state.dfs['Produccion'], df_p], ignore_index=True)
+                    st.success(f"¡{len(df_p)} registros inyectados con éxito!")
                 except Exception as e:
                     st.error(f"Error procesando Producción: {e}")
 
-# --- VENTAS & ANALÍTICA ---
+# ==========================================
+# 4. PANTALLA: VENTAS Y ANALÍTICA CHURN
+# ==========================================
 elif menu == "💰 1. Ventas & Analítica":
     st.title("💰 Análisis de Ventas y Fidelización")
-    df_v = dfs_filtrados['Ventas'].copy()
+    df = st.session_state.dfs.get('Ventas')
     
-    if df_v.empty:
-        st.warning("No hay datos de ventas para mostrar en este periodo.")
+    if df is None or df.empty:
+        st.info("Sube datos de ventas para ver la analítica.")
     else:
-        df_v['Descuento'] = pd.to_numeric(df_v.get('Descuento', 0), errors='coerce').fillna(0)
-        df_v['Monto_Vendido'] = (df_v['Cantidad'] * df_v['Precio_Venta']) - df_v['Descuento']
-        df_v['Utilidad_Bruta'] = df_v['Monto_Vendido'] - (df_v['Cantidad'] * df_v['Costo_Unitario'])
+        df['Descuento'] = pd.to_numeric(df.get('Descuento', 0), errors='coerce').fillna(0)
+        df['Utilidad_Bruta'] = (df['Cantidad'] * df['Precio_Venta']) - df['Descuento'] - (df['Cantidad'] * df['Costo_Unitario'])
         
-        # Gráficos
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6), facecolor='#0f172a')
-        
-        # Gráfico 1: Termómetro Vendedores
-        ventas_vendedor = df_v.groupby('Vendedor')['Monto_Vendido'].sum().reset_index()
-        df_metas = st.session_state['dfs'].get('Metas_Vendedores', pd.DataFrame())
-        
-        if not df_metas.empty and 'Vendedor' in df_metas.columns and 'Meta' in df_metas.columns:
-            ventas_vendedor['Vendedor'] = ventas_vendedor['Vendedor'].astype(str).str.strip()
-            df_metas['Vendedor'] = df_metas['Vendedor'].astype(str).str.strip()
-            ventas_vendedor = pd.merge(ventas_vendedor, df_metas, on='Vendedor', how='left')
-            ventas_vendedor['Meta'] = pd.to_numeric(ventas_vendedor['Meta'], errors='coerce').fillna(1000) 
-        else:
-            ventas_vendedor['Meta'] = 1000
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Rendimiento por Vendedor (Soles)")
+            st.bar_chart(df.groupby('Vendedor')['Utilidad_Bruta'].sum().sort_values(ascending=False))
+        with col2:
+            st.subheader("Top Clientes más Rentables")
+            st.bar_chart(df.groupby('Cliente')['Utilidad_Bruta'].sum().sort_values(ascending=False).head(10))
 
-        ventas_vendedor['Porcentaje'] = (ventas_vendedor['Monto_Vendido'] / ventas_vendedor['Meta']) * 100
-        ventas_vendedor = ventas_vendedor.sort_values(by='Porcentaje', ascending=True).tail(10)
-        
-        vendedores = ventas_vendedor['Vendedor']
-        ventas = ventas_vendedor['Monto_Vendido']
-        metas = ventas_vendedor['Meta']
-        
-        ax1.barh(vendedores, metas, color='#334155', label='Meta Asignada (S/)')
-        ax1.barh(vendedores, ventas, color='#3b82f6', label='Venta Real (S/)', alpha=0.9)
-        
-        for i, (v, m, p) in enumerate(zip(ventas, metas, ventas_vendedor['Porcentaje'])):
-            color_txt = '#10b981' if p >= 100 else ('#f59e0b' if p >= 70 else '#ef4444')
-            pos_x = max(v, m) + (metas.max() * 0.05)
-            ax1.text(pos_x, i, f"{p:.1f}%", color=color_txt, fontweight='bold', va='center')
+        st.markdown("---")
+        st.subheader("🚨 Alarma de Deserción (Clientes inactivos > 60 días)")
+        if 'Fecha' in df.columns:
+            hoy = pd.Timestamp.today()
+            df_clientes = df.groupby('Cliente')['Fecha'].max().reset_index()
+            df_clientes['Días Inactivos'] = (hoy - df_clientes['Fecha']).dt.days
             
-        ax1.set_title('Termómetro de Metas por Vendedor', color='white', fontweight='bold')
-        ax1.tick_params(colors='#94a3b8')
-        ax1.legend(loc='lower right', facecolor='#1e293b', edgecolor='white', labelcolor='white')
-        ax1.set_facecolor('#0f172a')
-
-        # Gráfico 2: Top Clientes
-        clientes = df_v.groupby('Cliente')['Utilidad_Bruta'].sum().sort_values().tail(5)
-        ax2.barh(clientes.index, clientes.values, color='#10b981')
-        ax2.set_title('Top 5 Clientes (Por Utilidad Neta)', color='white', fontweight='bold')
-        ax2.tick_params(colors='#94a3b8')
-        ax2.set_facecolor('#0f172a')
-        
-        plt.tight_layout()
-        st.pyplot(fig)
+            def resaltar_churn(fila):
+                return ['background-color: #fee2e2; color: #991b1b; font-weight: bold' if fila['Días Inactivos'] > 60 else '' for _ in fila]
+            
+            st.dataframe(df_clientes.sort_values(by='Días Inactivos', ascending=False).style.apply(resaltar_churn, axis=1), use_container_width=True)
         
         st.markdown("---")
-        # Gráfico 3: Productos Ganadores
-        st.subheader("🏆 PRODUCTOS GANADORES (Por Galones Vendidos)")
-        top_productos = df_v.groupby('Producto')['Cantidad'].sum().sort_values().tail(10) 
-        fig2, ax3 = plt.subplots(figsize=(10, 5), facecolor='#0f172a')
-        ax3.barh(top_productos.index, top_productos.values, color='#f59e0b')
-        ax3.tick_params(colors='#94a3b8')
-        ax3.set_facecolor('#0f172a')
-        plt.tight_layout()
-        st.pyplot(fig2)
+        st.subheader("📱 Métricas Digitales (ROI/CAC)")
+        c1, c2, c3 = st.columns(3)
+        ventas_cerradas = c1.number_input("Ventas por Redes (S/)", value=5000.0)
+        sueldo = c2.number_input("Sueldo Vendedora (S/)", value=1025.0)
+        inversion = c3.number_input("Inversión Ads (S/)", value=300.0)
+        roi = (ventas_cerradas - (sueldo + inversion)) / (sueldo + inversion) * 100 if (sueldo + inversion) > 0 else 0
+        st.metric("ROI Digital", f"{roi:.1f}%")
 
-# --- PRODUCCIÓN & MRP ---
+# ==========================================
+# 5. PANTALLA: PRODUCCIÓN Y MRP
+# ==========================================
 elif menu == "🏭 2. Producción & MRP":
-    st.title("🏭 Analítica de Producción")
-    df_p = dfs_filtrados['Produccion'].copy()
+    st.title("🏭 Eficiencia de Planta y MRP Predictivo")
+    df = st.session_state.dfs.get('Produccion')
     
-    if df_p.empty:
-        st.warning("No hay datos de Planta para el periodo filtrado.")
-    else:
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5), facecolor='#0f172a')
-        
-        if 'Cantidad_Producida' in df_p.columns:
-            prod_cant = df_p.groupby('Producto')['Cantidad_Producida'].sum().sort_values().tail(5)
-            ax1.barh(prod_cant.index, prod_cant.values, color='#8b5cf6')
-            ax1.set_title('Top Químicos Fabricados (Volumen)', color='white')
-        
-        ax1.tick_params(colors='#94a3b8')
-        ax1.set_facecolor('#0f172a')
+    if df is not None and not df.empty:
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Volumen Fabricado")
+            if 'Cantidad_Producida' in df.columns:
+                st.bar_chart(df.groupby('Producto')['Cantidad_Producida'].sum().sort_values(ascending=False).head(10))
+        with col2:
+            st.subheader("Pérdidas por Mermas (Soles)")
+            if 'Merma_Soles' in df.columns:
+                st.bar_chart(df.groupby('Producto')['Merma_Soles'].sum().sort_values(ascending=False).head(10), color="#ff4b4b")
 
-        if 'Merma_Soles' in df_p.columns:
-            mermas = df_p.groupby('Producto')['Merma_Soles'].sum().sort_values(ascending=False).head(5)
-            ax2.bar(mermas.index, mermas.values, color='#ef4444')
-            ax2.set_title('Pérdidas por Merma (Soles)', color='white')
-            ax2.tick_params(colors='white', labelrotation=15)
-        
-        ax2.set_facecolor('#0f172a')
-        plt.tight_layout()
-        st.pyplot(fig)
-
-# --- FINANZAS & COSTOS ---
-elif menu == "📈 3. Finanzas & Costos":
-    st.title("📈 Finanzas & Costos")
-    
-    incluir_gastos = st.checkbox("✅ INCLUIR GASTOS Y MERMAS (Cálculo Neto)", value=True)
     st.markdown("---")
+    st.subheader("⚙️ Planificación de Producción (MRP)")
+    c1, c2, c3, c4 = st.columns(4)
+    ventas_promedio = c1.number_input("Ventas Semanales Promedio", value=500)
+    stock_seguridad = c2.number_input("Stock Seguridad", value=200)
+    stock_actual = c3.number_input("Stock Actual", value=150)
+    lote_optimo = c4.number_input("Lote Óptimo de Máquina", value=200)
     
-    df_v = dfs_filtrados['Ventas'].copy()
-    df_g = dfs_filtrados['Gastos'].copy()
-    df_p = dfs_filtrados['Produccion'].copy()
+    necesidad_bruta = (ventas_promedio + stock_seguridad) - stock_actual
+    orden = np.ceil(necesidad_bruta / lote_optimo) * lote_optimo if lote_optimo > 0 else 0
+    st.success(f"**Orden de Producción Sugerida:** {orden:,.0f} Unidades")
 
-    if df_v.empty: utilidad_bruta = 0
-    else:
+# ==========================================
+# 6. PANTALLA: FINANZAS Y COSTOS 
+# ==========================================
+elif menu == "⚖️ 3. Finanzas & Costos":
+    st.title("⚖️ Balance Financiero y Costos Estratégicos")
+    
+    df_v = st.session_state.dfs.get('Ventas', pd.DataFrame())
+    df_g = st.session_state.dfs.get('Gastos', pd.DataFrame())
+    df_p = st.session_state.dfs.get('Produccion', pd.DataFrame())
+
+    utilidad_bruta = 0
+    if not df_v.empty:
         df_v['Descuento'] = pd.to_numeric(df_v.get('Descuento', 0), errors='coerce').fillna(0)
         utilidad_bruta = ((df_v['Cantidad'] * df_v['Precio_Venta']).sum() - df_v['Descuento'].sum()) - (df_v['Cantidad'] * df_v['Costo_Unitario']).sum()
 
-    if incluir_gastos:
-        mermas = df_p['Merma_Soles'].sum() if not df_p.empty and 'Merma_Soles' in df_p.columns else 0
-        tiene_fecha_gastos = 'Fecha' in df_g.columns if not df_g.empty else False
-        tiene_tipo = 'Tipo' in df_g.columns if not df_g.empty else False
-        
-        gastos_fijos_total = 0
-        gastos_variables_total = 0
+    gastos_fijos = df_g['Monto'].sum() if not df_g.empty else 0
+    mermas = df_p['Merma_Soles'].sum() if not df_p.empty else 0
+    resultado_final = utilidad_bruta - gastos_fijos - mermas
 
-        if not df_g.empty:
-            df_g['Monto'] = pd.to_numeric(df_g.get('Monto', 0), errors='coerce').fillna(0)
-            if tiene_tipo:
-                df_fijos = df_g[df_g['Tipo'].astype(str).str.upper() == 'FIJO']
-                df_vars = df_g[df_g['Tipo'].astype(str).str.upper() == 'VARIABLE']
-            else:
-                df_fijos = df_g
-                df_vars = pd.DataFrame({'Monto': []})
+    st.markdown("### Resumen Consolidado")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("1. Utilidad Comercial", f"S/ {utilidad_bruta:,.2f}")
+    col2.metric("2. Pérdidas Planta", f"- S/ {mermas:,.2f}")
+    col3.metric("3. Gastos Fijos", f"- S/ {gastos_fijos:,.2f}")
+    col4.metric("💰 RESULTADO NETO", f"S/ {resultado_final:,.2f}")
 
-            if tiene_fecha_gastos:
-                gastos_fijos_total = df_fijos['Monto'].sum()
-                gastos_variables_total = df_vars['Monto'].sum()
-                texto_gastos = (f"**3. GASTOS FIJOS (Del periodo):** - S/ {gastos_fijos_total:,.2f}  \n"
-                                f"**4. GASTOS VARIABLES (Imprevistos):** - S/ {gastos_variables_total:,.2f}  \n")
-            else:
-                gastos_fijos_mes = df_fijos['Monto'].sum()
-                gastos_fijos_total = (gastos_fijos_mes / 30.0) * st.session_state['dias_periodo']
-                gastos_variables_total = df_vars['Monto'].sum()
-                texto_gastos = (f"**3. GASTOS FIJOS (Proporcional {st.session_state['dias_periodo']} días):** - S/ {gastos_fijos_total:,.2f}  \n"
-                                f"**4. GASTOS VARIABLES (Registrados):** - S/ {gastos_variables_total:,.2f}  \n")
+    st.markdown("---")
+    colA, colB = st.columns(2)
+    
+    with colA:
+        st.subheader("⚖️ Punto de Equilibrio")
+        margen_pond = st.slider("Margen de Contribución Promedio (%)", 1, 100, 35) / 100
+        pe = gastos_fijos / margen_pond if margen_pond > 0 else 0
+        st.metric("Meta Mínima para no perder dinero", f"S/ {pe:,.2f}")
+    
+    with colB:
+        st.subheader("🚦 Semáforo de Rentabilidad por Producto")
+        if not df_v.empty:
+            df_semaforo = df_v.groupby('Producto').agg({'Precio_Venta': 'mean', 'Costo_Unitario': 'mean'}).reset_index()
+            df_semaforo['Margen (S/)'] = df_semaforo['Precio_Venta'] - df_semaforo['Costo_Unitario']
+            
+            def semaforo(fila):
+                return ['background-color: #fee2e2; color: #991b1b; font-weight: bold' if fila['Margen (S/)'] < 0 else '' for _ in fila]
+            
+            st.dataframe(df_semaforo.style.apply(semaforo, axis=1), use_container_width=True)
         else:
-            texto_gastos = ("**3. GASTOS FIJOS:** - S/ 0.00  \n"
-                            "**4. GASTOS VARIABLES:** - S/ 0.00  \n")
+            st.info("Sube datos de Facel para calcular rentabilidad.")
 
-        resultado_final = utilidad_bruta - gastos_fijos_total - gastos_variables_total - mermas
-        texto_titulo = "BALANCE NETO (Con Gastos Operativos)"
-    else:
-        gastos_fijos_total, gastos_variables_total, mermas = 0, 0, 0
-        resultado_final = utilidad_bruta
-        texto_gastos = ("**3. GASTOS FIJOS (Ocultos):** - S/ 0.00  \n"
-                        "**4. GASTOS VARIABLES (Ocultos):** - S/ 0.00  \n")
-        texto_titulo = "BALANCE BRUTO (Solo Ventas Comerciales)"
-
-    color_final = "#10b981" if resultado_final >= 0 else "#ef4444"
-    
-    st.markdown(f"### {texto_titulo}")
-    st.info(f"**1. UTILIDAD DE VENTAS:** S/ {utilidad_bruta:,.2f}  \n"
-            f"**2. PÉRDIDAS EN PLANTA (Mermas):** - S/ {mermas:,.2f}  \n"
-            + texto_gastos)
-    
-    st.markdown(f"<h2 style='color: {color_final};'>💰 RESULTADO FINAL: S/ {resultado_final:,.2f}</h2>", unsafe_allow_html=True)
-
+# ==========================================
+# 7. PANTALLA: INVENTARIO
+# ==========================================
 elif menu == "📦 4. Inventario":
-    st.title("📦 Inventario")
-    st.info("Módulo en construcción (Próximamente).")
+    st.title("📦 Inventario en Tiempo Real")
+    df = st.session_state.dfs.get('Inventario')
+    
+    if df is None or df.empty:
+        st.info("No hay datos de Inventario en la matriz.")
+    else:
+        col_evaluar = 'Stock' if 'Stock' in df.columns else ('Cantidad' if 'Cantidad' in df.columns else None)
+        if col_evaluar:
+            valores_numericos = pd.to_numeric(df[col_evaluar], errors='coerce')
+            criticos = df[valores_numericos < 0]
+            if not criticos.empty:
+                st.error(f"⚠️ Alertas de Stock Crítico: **{len(criticos)}** insumos en negativo. ↑ Revisar urgente.")
+            else:
+                st.success("✅ Stock saludable.")
+        st.dataframe(df.style.apply(resaltar_stock_critico, axis=1), use_container_width=True, height=500)
 
-elif menu == "🏪 5. Tienda Fiori (Unit Economics)":
-    st.title("🏪 Tienda Fiori (Unit Economics)")
-    st.info("Módulo en construcción (Próximamente).")
+# ==========================================
+# 8. PANTALLA: TIENDA FIORI
+# ==========================================
+elif menu == "🏬 5. Tienda Fiori (Unit Economics)":
+    st.title("🏬 Rentabilidad Diaria - Quinearoma Fiori")
+    st.write("Cálculo de centro de costos independiente para mostrador.")
+    
+    modalidad = st.radio("Selector de Prorrateo Diario:", 
+                         ["Opción A: Fase Inicial (Cuota Fija Diaria)", 
+                          "Opción B: Fase Avanzada (% Histórico)"], horizontal=True)
+    
+    ventas_hoy = st.number_input("Utilidad Bruta del Día de hoy (S/)", value=0.0)
+    
+    if "Opción A" in modalidad:
+        cf_mensual = st.number_input("Costos Fijos del Local (Mensual)", value=2500.0)
+        cuota_diaria = cf_mensual / 30
+        rentabilidad = ventas_hoy - cuota_diaria
+        st.metric("Rentabilidad Neta Hoy (S/)", f"S/ {rentabilidad:,.2f}", delta=f"- S/ {cuota_diaria:,.2f} Gastos")
+    else:
+        pct = st.slider("% Histórico de Gastos vs Ventas", 1, 50, 15) / 100
+        descuento = ventas_hoy * pct
+        rentabilidad = ventas_hoy - descuento
+        st.metric("Rentabilidad Neta Hoy (S/)", f"S/ {rentabilidad:,.2f}", delta=f"- S/ {descuento:,.2f} Gastos")
+
+# ==========================================
+# 9. DASHBOARD INICIAL
+# ==========================================
+elif menu == "📊 Inicio (Dashboard)":
+    st.title("📊 Panel de Control Principal")
+    st.write(f"Resumen gerencial de **{empresa_activa}**.")
+    df_v = st.session_state.dfs.get('Ventas', pd.DataFrame())
+    if not df_v.empty:
+        st.success("Sistema conectado. Usa el menú lateral para navegar por los módulos.")
+    else:
+        st.warning("👈 Ve a la pestaña 'Carga de Datos' para arrancar el sistema.")
