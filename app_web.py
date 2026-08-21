@@ -142,7 +142,10 @@ if menu == "📥 Carga de Datos":
                 if st.button("Procesar FACEL", use_container_width=True, type="primary"):
                     try:
                         xls_f = pd.ExcelFile(archivo_facel)
-                        lista_ventas = [pd.read_excel(xls_f, sheet_name=h, header=1) for h in ['FACTURAS', 'BOLETAS DE VENTAS', 'NOTAS DE VENTAS'] if h in xls_f.sheet_names]
+                        # LA NUEVA ALARMA PARA DETECTAR HOJAS
+                        hojas_buscadas = ['FACTURAS', 'BOLETAS DE VENTAS', 'NOTAS DE VENTAS']
+                        lista_ventas = [pd.read_excel(xls_f, sheet_name=h, header=1) for h in hojas_buscadas if h in xls_f.sheet_names]
+                        
                         if lista_ventas:
                             df_bruto = pd.concat(lista_ventas, ignore_index=True)
                             df_bruto.columns = df_bruto.columns.str.strip()
@@ -169,6 +172,8 @@ if menu == "📥 Carga de Datos":
                             df_v = df_v[df_v['Cantidad'] > 0]
                             st.session_state.dfs['Ventas'] = pd.concat([st.session_state.dfs['Ventas'], df_v], ignore_index=True)
                             st.success(f"¡{len(df_v)} ventas de Aquaz inyectadas con éxito!")
+                        else:
+                            st.warning(f"⚠️ No se procesó nada. El sistema busca las hojas exactas: 'FACTURAS', 'BOLETAS DE VENTAS' o 'NOTAS DE VENTAS'. Las pestañas de tu archivo se llaman: {xls_f.sheet_names}")
                     except Exception as e:
                         st.error(f"Error procesando Facel: {e}")
 
