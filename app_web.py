@@ -3,6 +3,25 @@ import pandas as pd
 import numpy as np
 import os
 import warnings
+# --- INICIO DE SISTEMA DE SEGURIDAD ---
+if "autenticado" not in st.session_state:
+    st.session_state["autenticado"] = False
+
+if not st.session_state["autenticado"]:
+    st.title("🔒 Acceso al ERP Gerencial")
+    usuario = st.text_input("Usuario")
+    clave = st.text_input("Contraseña", type="password")
+    
+    if st.button("Entrar"):
+        # Comprueba si el usuario existe en la caja fuerte y si la clave es correcta
+        if usuario in st.secrets["passwords"] and st.secrets["passwords"][usuario] == clave:
+            st.session_state["autenticado"] = True
+            st.rerun() # Recarga la página ya con acceso libre
+        else:
+            st.error("😕 Usuario o contraseña incorrectos")
+    
+    st.stop() # Esto detiene todo para que no se vea el panel de control abajo
+# --- FIN DE SISTEMA DE SEGURIDAD ---
 
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
