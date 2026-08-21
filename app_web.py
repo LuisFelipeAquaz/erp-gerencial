@@ -59,7 +59,7 @@ def resaltar_stock_critico(fila):
 # 2. BARRA LATERAL (SIDEBAR MULTISOCIEDAD)
 # ==========================================
 st.sidebar.title("⚙️ Panel de Control")
-empresa_activa = st.sidebar.selectbox("🏢 ENTORNO DE TRABAJO:", ["Aquaz (Planta/Mayorista)", "Quinearoma (Tienda Fiori)", "Consolidado Grupo"])
+empresa_activa = st.sidebar.selectbox("🏢 ENTORNO DE TRABAJO:", ["Aquaz (Planta/Mayorista)", "Quimaroma (Tienda Fiori)", "Consolidado Grupo"])
 st.sidebar.markdown("---")
 menu = st.sidebar.radio("Navegación Estratégica", [
     "📊 Inicio (Dashboard)", 
@@ -75,19 +75,28 @@ menu = st.sidebar.radio("Navegación Estratégica", [
 # ==========================================
 # 3. PANTALLA: CARGA DE DATOS (NUEVA TUBERÍA)
 # ==========================================
-if st.button("🗑️ Borrar toda la información en memoria y reiniciar", type="primary"):
-        st.session_state.dfs = {k: pd.DataFrame() for k in st.session_state.dfs.keys()}
-        st.success("¡Memoria borrada! El sistema está en cero.")
-        st.rerun()
+if menu == "📥 Carga de Datos":
+    st.title("📥 Centro de Inyección de Datos (Holding)")
+    st.write("Sube los archivos oficiales. El sistema cruzará costos y ventas automáticamente.")
     
-    if st.button("🗑️ Borrar toda la información en memoria y reiniciar", type="primary"):
-        st.session_state.dfs = {k: pd.DataFrame() for k in st.session_state.dfs.keys()}
-        st.success("¡Memoria borrada! El sistema está en cero.")
+    # EL NUEVO BOTÓN INTELIGENTE ESTÁ AQUÍ
+    if st.button(f"🗑️ Borrar datos de {empresa_activa}", type="primary"):
+        if "Aquaz" in empresa_activa:
+            st.session_state.dfs['Ventas'] = pd.DataFrame()
+            st.session_state.dfs['Produccion'] = pd.DataFrame()
+            st.session_state.dfs['Gastos_Aquaz'] = pd.DataFrame()
+            st.success("¡Datos de Aquaz borrados! Quimaroma sigue intacto.")
+        elif "Quimaroma" in empresa_activa:
+            st.session_state.dfs['Ventas_Quima'] = pd.DataFrame()
+            st.session_state.dfs['Gastos_Quima'] = pd.DataFrame()
+            st.success("¡Datos de Quimaroma borrados! Aquaz sigue intacto.")
+        else:
+            st.session_state.dfs = {k: pd.DataFrame() for k in st.session_state.dfs.keys()}
+            st.success("¡Memoria de todo el Holding borrada!")
         st.rerun()
 
     st.markdown("---")
     
-    # Nombre corregido a "Aquaz / Quimaroma"
     tab_bases, tab_ventas, tab_planta = st.tabs(["🗄️ 1. Bases y Gastos (Matriz)", "🚀 2. Ventas (Aquaz / Quimaroma)", "🏭 3. Producción"])
     
     with tab_bases:
@@ -146,7 +155,7 @@ if st.button("🗑️ Borrar toda la información en memoria y reiniciar", type=
                             df_v['Cantidad'] = pd.to_numeric(df_bruto.get('CANTIDAD', pd.Series(dtype=float)), errors='coerce').fillna(0)
                             df_v['Precio_Venta'] = pd.to_numeric(df_bruto.get('PRECIO UNITARIO', pd.Series(dtype=float)), errors='coerce').fillna(0)
                             df_v['Descuento'] = pd.to_numeric(df_bruto.get('DESCUENTO', pd.Series(dtype=float)), errors='coerce').fillna(0)
-                            df_v['Zona'] = "No registrada" # Espacio listo para cuando lo agregues
+                            df_v['Zona'] = "No registrada" 
                             
                             df_v['Costo_Unitario_Facel'] = pd.to_numeric(df_bruto.get('COSTO UNITARIO', pd.Series(dtype=float)), errors='coerce').fillna(0)
                             df_costos = st.session_state.dfs.get('Maestro_Costos', pd.DataFrame())
@@ -224,7 +233,6 @@ if st.button("🗑️ Borrar toda la información en memoria y reiniciar", type=
 elif menu == "💰 1. Ventas & Analítica":
     st.title("💰 Análisis de Ventas y Fidelización")
     
-    # Logica inteligente que respeta tu menú lateral
     df_aquaz = st.session_state.dfs.get('Ventas', pd.DataFrame())
     df_quima = st.session_state.dfs.get('Ventas_Quima', pd.DataFrame())
     
@@ -264,7 +272,7 @@ elif menu == "💰 1. Ventas & Analítica":
 elif menu == "🏭 2. Producción & MRP":
     st.title("🏭 Eficiencia de Planta y MRP Predictivo")
     
-    if empresa_activa == "Quinearoma (Tienda Fiori)":
+    if empresa_activa == "Quimaroma (Tienda Fiori)":
         st.info("⚠️ El módulo de Producción y MRP es exclusivo de la fábrica (AQUAZ). Por favor cambia tu 'Entorno de Trabajo' en el panel izquierdo.")
     else:
         df = st.session_state.dfs.get('Produccion')
@@ -302,7 +310,7 @@ elif menu == "⚖️ 3. Finanzas & Costos":
     
     if empresa_activa == "Aquaz (Planta/Mayorista)":
         df_v = df_aquaz
-    elif empresa_activa == "Quinearoma (Tienda Fiori)":
+    elif empresa_activa == "Quimaroma (Tienda Fiori)":
         df_v = df_quima
     else:
         df_v = pd.concat([df_aquaz, df_quima], ignore_index=True)
@@ -372,7 +380,7 @@ elif menu == "📦 4. Inventario":
 # 8. PANTALLA: TIENDA FIORI (INTACTO)
 # ==========================================
 elif menu == "🏬 5. Tienda Fiori (Unit Economics)":
-    st.title("🏬 Rentabilidad Diaria y por Cotización - Quinearoma Fiori")
+    st.title("🏬 Rentabilidad Diaria y por Cotización - Quimaroma Fiori")
     st.write("Simulador de rentabilidad multiproducto para tickets de mostrador.")
 
     st.subheader("🏢 1. Costo Operativo del Local")
@@ -445,7 +453,7 @@ elif menu == "👥 6. Retención de Clientes":
     
     if empresa_activa == "Aquaz (Planta/Mayorista)":
         df_v = df_aquaz
-    elif empresa_activa == "Quinearoma (Tienda Fiori)":
+    elif empresa_activa == "Quimaroma (Tienda Fiori)":
         df_v = df_quima
     else:
         df_v = pd.concat([df_aquaz, df_quima], ignore_index=True)
@@ -456,13 +464,11 @@ elif menu == "👥 6. Retención de Clientes":
         df_v['Descuento'] = pd.to_numeric(df_v.get('Descuento', 0), errors='coerce').fillna(0)
         df_v['Utilidad_Bruta'] = (df_v['Cantidad'] * df_v['Precio_Venta']) - df_v['Descuento'] - (df_v['Cantidad'] * df_v['Costo_Unitario'])
         
-        # Validar columnas Vendedor y Zona por si acaso
         if 'Vendedor' not in df_v.columns: df_v['Vendedor'] = 'Sin Vendedor'
         if 'Zona' not in df_v.columns: df_v['Zona'] = 'No registrada'
 
         hoy = pd.Timestamp.today()
         
-        # Agrupación con Vendedor y Zona
         df_clientes = df_v.groupby('Cliente').agg(
             Ultima_Compra=('Fecha', 'max'),
             Frecuencia_Compras=('Fecha', 'nunique'),
@@ -473,7 +479,6 @@ elif menu == "👥 6. Retención de Clientes":
         
         df_clientes['Días Sin Comprar'] = (hoy - df_clientes['Ultima_Compra']).dt.days
         
-        # Los 5 bloques de tiempo exactos que pediste
         c20 = df_clientes[df_clientes['Días Sin Comprar'] <= 20].sort_values(by='Utilidad_Total', ascending=False)
         c30 = df_clientes[(df_clientes['Días Sin Comprar'] > 20) & (df_clientes['Días Sin Comprar'] <= 30)].sort_values(by='Utilidad_Total', ascending=False)
         c45 = df_clientes[(df_clientes['Días Sin Comprar'] > 30) & (df_clientes['Días Sin Comprar'] <= 45)].sort_values(by='Utilidad_Total', ascending=False)
@@ -482,7 +487,6 @@ elif menu == "👥 6. Retención de Clientes":
         
         t1, t2, t3, t4, t5 = st.tabs(["🟢 < 20 días", "🟡 21-30 días", "🟠 31-45 días", "🔴 46-60 días", "⚫ +60 días (Dormidos)"])
         
-        # Columnas a mostrar incluyendo Vendedor y Zona
         cols_vista = ['Cliente', 'Vendedor', 'Zona', 'Días Sin Comprar', 'Ultima_Compra', 'Utilidad_Total']
         
         with t1:
