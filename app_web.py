@@ -75,9 +75,10 @@ menu = st.sidebar.radio("Navegación Estratégica", [
 # ==========================================
 # 3. PANTALLA: CARGA DE DATOS (NUEVA TUBERÍA)
 # ==========================================
-if menu == "📥 Carga de Datos":
-    st.title("📥 Centro de Inyección de Datos (Holding)")
-    st.write("Sube los archivos oficiales. El sistema cruzará costos y ventas automáticamente.")
+if st.button("🗑️ Borrar toda la información en memoria y reiniciar", type="primary"):
+        st.session_state.dfs = {k: pd.DataFrame() for k in st.session_state.dfs.keys()}
+        st.success("¡Memoria borrada! El sistema está en cero.")
+        st.rerun()
     
     if st.button("🗑️ Borrar toda la información en memoria y reiniciar", type="primary"):
         st.session_state.dfs = {k: pd.DataFrame() for k in st.session_state.dfs.keys()}
