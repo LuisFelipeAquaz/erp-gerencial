@@ -285,29 +285,55 @@ elif menu == "📦 4. Inventario":
         st.dataframe(df.style.apply(resaltar_stock_critico, axis=1), use_container_width=True, height=500)
 
 # ==========================================
-# 8. PANTALLA: TIENDA FIORI
+# ==========================================
+# 8. PANTALLA: TIENDA FIORI (Unit Economics)
 # ==========================================
 elif menu == "🏬 5. Tienda Fiori (Unit Economics)":
-    st.title("🏬 Rentabilidad Diaria - Quinearoma Fiori")
-    st.write("Cálculo de centro de costos independiente para mostrador.")
-    
-    modalidad = st.radio("Selector de Prorrateo Diario:", 
-                         ["Opción A: Fase Inicial (Cuota Fija Diaria)", 
-                          "Opción B: Fase Avanzada (% Histórico)"], horizontal=True)
-    
-    ventas_hoy = st.number_input("Utilidad Bruta del Día de hoy (S/)", value=0.0)
-    
-    if "Opción A" in modalidad:
-        cf_mensual = st.number_input("Costos Fijos del Local (Mensual)", value=2500.0)
-        cuota_diaria = cf_mensual / 30
-        rentabilidad = ventas_hoy - cuota_diaria
-        st.metric("Rentabilidad Neta Hoy (S/)", f"S/ {rentabilidad:,.2f}", delta=f"- S/ {cuota_diaria:,.2f} Gastos")
-    else:
-        pct = st.slider("% Histórico de Gastos vs Ventas", 1, 50, 15) / 100
-        descuento = ventas_hoy * pct
-        rentabilidad = ventas_hoy - descuento
-        st.metric("Rentabilidad Neta Hoy (S/)", f"S/ {rentabilidad:,.2f}", delta=f"- S/ {descuento:,.2f} Gastos")
+    st.title("🏬 Rentabilidad Diaria y por Pedido - Quinearoma Fiori")
+    st.write("Simulador de rentabilidad por ticket de venta en mostrador.")
 
+    # 1. Configuración de Gastos Fijos (El "Balde" del día)
+    st.subheader("🏢 1. Costo Operativo del Local")
+    cf_mensual = st.number_input("Costos Fijos del Local (Alquiler, Luz, Personal base) (S/)", value=2500.0, step=100.0)
+    cuota_diaria = cf_mensual / 30
+    st.info(f"💡 Tu local necesita generar **S/ {cuota_diaria:,.2f}** de utilidad bruta diaria (Punto de Equilibrio) para no perder dinero.")
+
+    st.markdown("---")
+
+    # 2. Análisis del Pedido Individual
+    st.subheader("🛒 2. Simulador de Pedido Individual")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        precio_venta = st.number_input("Precio Cobrado al Cliente (S/)", value=120.0, step=10.0)
+    with col2:
+        costo_producto = st.number_input("Costo de la Mercadería (S/)", value=70.0, step=10.0)
+    with col3:
+        gasto_variable = st.number_input("Gastos Extra (Empaque, flete, etc.) (S/)", value=0.0, step=5.0)
+
+    # Cálculos matemáticos
+    utilidad_pedido = precio_venta - costo_producto - gasto_variable
+    margen_pedido = (utilidad_pedido / precio_venta * 100) if precio_venta > 0 else 0
+    cobertura = (utilidad_pedido / cuota_diaria * 100) if cuota_diaria > 0 else 0
+
+    # 3. Panel de Resultados
+    st.markdown("#### 📊 Resultado de este Ticket:")
+    cA, cB, cC = st.columns(3)
+    cA.metric("Utilidad Neta del Pedido", f"S/ {utilidad_pedido:,.2f}")
+    cB.metric("Margen de Ganancia", f"{margen_pedido:.1f}%")
+    cC.metric("Cobertura de Cuota Diaria", f"{cobertura:.1f}%")
+
+    # Termómetro visual de éxito
+    if utilidad_pedido > 0:
+        st.progress(min(cobertura / 100, 1.0))
+        if cobertura >= 100:
+            st.success("🎉 ¡Excelente! Con este solo pedido ya cubriste todos los gastos fijos de hoy. Todo lo demás es ganancia pura.")
+        else:
+            st.warning(f"Este pedido es rentable. Aún te falta cubrir el **{100 - cobertura:.1f}%** de los gastos del día con otras ventas.")
+    elif utilidad_pedido < 0:
+        st.error("⚠️ Alerta: Este pedido te está generando pérdidas. El costo y los gastos superan al precio de venta.")
+    else:
+        st.info("Estás cambiando plata (Utilidad 0). No ganas ni pierdes, pero no ayuda a la cuota diaria.")
 # ==========================================
 # 9. PANTALLA: RETENCIÓN DE CLIENTES (CRM)
 # ==========================================
