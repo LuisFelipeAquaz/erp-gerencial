@@ -143,7 +143,7 @@ if menu == "📥 Carga de Datos":
                     try:
                         xls_f = pd.ExcelFile(archivo_facel)
                         # LA NUEVA ALARMA PARA DETECTAR HOJAS
-                        hojas_buscadas = ['FACTURAS', 'BOLETAS DE VENTAS', 'NOTAS DE VENTAS']
+                        hojas_buscadas = ['FACTURAS', 'BOLETAS DE VENTAS', 'NOTAS DE VENTAS', 'VENTAS GENERAL']
                         lista_ventas = [pd.read_excel(xls_f, sheet_name=h, header=1) for h in hojas_buscadas if h in xls_f.sheet_names]
                         
                         if lista_ventas:
