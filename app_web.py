@@ -5,6 +5,7 @@ import os
 import warnings
 import io
 from supabase import create_client, Client
+import plotly.express as px
 
 # ==========================================
 # 1. CONFIGURACIÓN DE PÁGINA
@@ -274,6 +275,10 @@ if menu == "📥 Carga de Datos":
                 except Exception as e:
                     st.error(f"Error: {e}")
 
+
+# ==========================================
+# NUEVO: MÓDULO INTERACTIVO DE VENTAS Y ANALÍTICA
+# ==========================================
 elif menu == "💰 1. Ventas & Analítica":
     st.title("💰 Análisis de Ventas y Fidelización")
     df_aquaz = st.session_state.dfs.get('Ventas', pd.DataFrame())
@@ -287,18 +292,65 @@ elif menu == "💰 1. Ventas & Analítica":
         df['Descuento'] = pd.to_numeric(df.get('Descuento', 0), errors='coerce').fillna(0)
         df['Utilidad_Bruta'] = (df['Cantidad'] * df['Precio_Venta']) - df['Descuento'] - (df['Cantidad'] * df['Costo_Unitario'])
         
+        # --- SECCIÓN DE GRÁFICOS PERSONALIZADOS ---
+        st.markdown("### ⚙️ Personalización de Gráficos")
+        tipo_grafico = st.radio("Elige el estilo visual:", ["📊 Gráfico de Barras", "🍩 Gráfico Circular (Porcentajes)", "📈 Gráfico de Líneas"], horizontal=True)
+
         c1, c2 = st.columns(2)
-        c1.subheader("Rendimiento por Vendedor (S/)")
-        c1.bar_chart(df.groupby('Vendedor')['Utilidad_Bruta'].sum().sort_values(ascending=False))
-        c2.subheader("Top Clientes más Rentables")
-        c2.bar_chart(df.groupby('Cliente')['Utilidad_Bruta'].sum().sort_values(ascending=False).head(10))
+
+        @st.cache_data
+        def convert_to_excel(df_export):
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                df_export.to_excel(writer, index=False, sheet_name='Datos')
+            return output.getvalue()
+
+        # --- 1. PROCESAMIENTO VENDEDORES ---
+        df_vend = df.groupby('Vendedor')['Utilidad_Bruta'].sum().reset_index()
+        df_vend = df_vend.sort_values(by='Utilidad_Bruta', ascending=False)
+        total_vend = df_vend['Utilidad_Bruta'].sum()
+        df_vend['Porcentaje (%)'] = (df_vend['Utilidad_Bruta'] / total_vend) * 100 if total_vend > 0 else 0
+
+        c1.subheader("Rendimiento por Vendedor")
+        if "Barras" in tipo_grafico:
+            fig1 = px.bar(df_vend, x='Vendedor', y='Utilidad_Bruta', text=df_vend['Porcentaje (%)'].apply(lambda x: f'{x:.1f}%'))
+        elif "Circular" in tipo_grafico:
+            fig1 = px.pie(df_vend, names='Vendedor', values='Utilidad_Bruta', hole=0.4)
+        else:
+            fig1 = px.line(df_vend, x='Vendedor', y='Utilidad_Bruta', markers=True)
+            
+        fig1.update_layout(margin=dict(t=20, b=20, l=0, r=0))
+        c1.plotly_chart(fig1, use_container_width=True)
+        # Botón para descargar el Excel de los Vendedores
+        c1.download_button("📥 Exportar Tabla Vendedores (Excel)", data=convert_to_excel(df_vend), file_name="Rendimiento_Vendedores.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+
+        # --- 2. PROCESAMIENTO CLIENTES ---
+        df_cli = df.groupby('Cliente')['Utilidad_Bruta'].sum().reset_index()
+        df_cli = df_cli.sort_values(by='Utilidad_Bruta', ascending=False).head(10)
+        total_cli = df_cli['Utilidad_Bruta'].sum()
+        df_cli['Porcentaje (%)'] = (df_cli['Utilidad_Bruta'] / total_cli) * 100 if total_cli > 0 else 0
+
+        c2.subheader("Top 10 Clientes más Rentables")
+        if "Barras" in tipo_grafico:
+            fig2 = px.bar(df_cli, x='Cliente', y='Utilidad_Bruta', text=df_cli['Porcentaje (%)'].apply(lambda x: f'{x:.1f}%'))
+        elif "Circular" in tipo_grafico:
+            fig2 = px.pie(df_cli, names='Cliente', values='Utilidad_Bruta', hole=0.4)
+        else:
+            fig2 = px.line(df_cli, x='Cliente', y='Utilidad_Bruta', markers=True)
+            
+        fig2.update_layout(margin=dict(t=20, b=20, l=0, r=0))
+        c2.plotly_chart(fig2, use_container_width=True)
+        # Botón para descargar el Excel del Top Clientes
+        c2.download_button("📥 Exportar Tabla Clientes (Excel)", data=convert_to_excel(df_cli), file_name="Top_Clientes.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+
+        st.info("💡 **Tip Pro:** Si quieres guardar el gráfico como imagen, solo pasa el mouse por encima del dibujo y haz clic en el ícono de la **cámara de fotos** que aparece en la esquina superior derecha.")
 
         st.markdown("---")
         st.subheader("📱 Métricas Digitales (ROI/CAC)")
-        c1, c2, c3 = st.columns(3)
-        v_cerradas = c1.number_input("Ventas por Redes (S/)", value=5000.0)
-        sueldo = c2.number_input("Sueldo Vendedora (S/)", value=1025.0)
-        inv = c3.number_input("Inversión Ads (S/)", value=300.0)
+        col_m1, col_m2, col_m3 = st.columns(3)
+        v_cerradas = col_m1.number_input("Ventas por Redes (S/)", value=5000.0)
+        sueldo = col_m2.number_input("Sueldo Vendedora (S/)", value=1025.0)
+        inv = col_m3.number_input("Inversión Ads (S/)", value=300.0)
         roi = (v_cerradas - (sueldo + inv)) / (sueldo + inv) * 100 if (sueldo + inv) > 0 else 0
         st.metric("ROI Digital", f"{roi:.1f}%")
 
@@ -440,7 +492,7 @@ elif menu == "👥 6. Retención de Clientes":
             st.dataframe(c_dorm[cols], use_container_width=True, hide_index=True)
 
 # ==========================================
-# NUEVO MÓDULO: GESTIÓN DE PRECIOS QUIMAROMA
+# 7. GESTIÓN DE PRECIOS QUIMAROMA
 # ==========================================
 elif menu == "🏪 7. Precios Quimaroma":
     st.title("🏪 Control de Costos y Precios (Quimaroma - Fiori)")
@@ -453,8 +505,6 @@ elif menu == "🏪 7. Precios Quimaroma":
                 df_precios = pd.read_excel(archivo_precios)
                 df_precios.columns = df_precios.columns.str.strip()
                 
-                # Para que empate perfectamente con tu sistema actual, el "Costo_Estandar_Soles" 
-                # (tu colchón financiero) se convierte en el "Costo_Real" que busca el cruce de ventas.
                 df_precios = df_precios.rename(columns={
                     'Nombre_Insumo': 'Producto', 
                     'Costo_Estandar_Soles': 'Costo_Real'
@@ -470,7 +520,6 @@ elif menu == "🏪 7. Precios Quimaroma":
     df_actual = st.session_state.dfs.get('Maestro_Costos', pd.DataFrame())
     if not df_actual.empty:
         st.subheader("📋 Lista Vigente Oficial")
-        # Mostramos la tabla amigable para lectura
         df_mostrar = df_actual.copy()
         if 'Costo_Real' in df_mostrar.columns:
             df_mostrar = df_mostrar.rename(columns={'Costo_Real': 'Costo Estándar (S/)'})
