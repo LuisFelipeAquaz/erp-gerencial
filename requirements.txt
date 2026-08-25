@@ -1,5 +1,7 @@
 streamlit
 pandas
+numpy
 openpyxl
-supabase
 xlsxwriter
+supabase
+plotly
