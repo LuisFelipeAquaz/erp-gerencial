@@ -102,7 +102,8 @@ menu = st.sidebar.radio("Navegación Estratégica", [
     "⚖️ 3. Finanzas & Costos",
     "📦 4. Inventario",
     "🏬 5. Tienda Fiori (Unit Economics)",
-    "👥 6. Retención de Clientes"
+    "👥 6. Retención de Clientes",
+    "🏪 7. Precios Quimaroma"
 ])
 
 # ==========================================
@@ -437,6 +438,53 @@ elif menu == "👥 6. Retención de Clientes":
             st.subheader(f"⚫ Dormidos - Total: {len(c_dorm)}")
             if not c_dorm.empty: st.download_button("📥 Descargar (.xlsx)", data=convert_df_to_excel(c_dorm[cols]), file_name=f'dormidos_{vendedor_sel}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             st.dataframe(c_dorm[cols], use_container_width=True, hide_index=True)
+
+# ==========================================
+# NUEVO MÓDULO: GESTIÓN DE PRECIOS QUIMAROMA
+# ==========================================
+elif menu == "🏪 7. Precios Quimaroma":
+    st.title("🏪 Control de Costos y Precios (Quimaroma - Fiori)")
+    st.info("Sube aquí tu Excel quincenal con la plantilla oficial. El 'Costo Estándar' se usará para calcular la rentabilidad real de tus ventas.")
+
+    archivo_precios = st.file_uploader("Sube tu Excel de Precios Actualizado", type=["xlsx", "xls"])
+    if archivo_precios:
+        if st.button("Cargar Lista Oficial de Precios", type="primary", use_container_width=True):
+            try:
+                df_precios = pd.read_excel(archivo_precios)
+                df_precios.columns = df_precios.columns.str.strip()
+                
+                # Para que empate perfectamente con tu sistema actual, el "Costo_Estandar_Soles" 
+                # (tu colchón financiero) se convierte en el "Costo_Real" que busca el cruce de ventas.
+                df_precios = df_precios.rename(columns={
+                    'Nombre_Insumo': 'Producto', 
+                    'Costo_Estandar_Soles': 'Costo_Real'
+                })
+                
+                st.session_state.dfs['Maestro_Costos'] = df_precios
+                guardar_en_nube('Maestro_Costos', df_precios)
+                st.success("✅ ¡Lista de precios oficial actualizada en la nube!")
+            except Exception as e:
+                st.error(f"Error procesando el Excel. Asegúrate de tener las columnas correctas: {e}")
+
+    st.markdown("---")
+    df_actual = st.session_state.dfs.get('Maestro_Costos', pd.DataFrame())
+    if not df_actual.empty:
+        st.subheader("📋 Lista Vigente Oficial")
+        # Mostramos la tabla amigable para lectura
+        df_mostrar = df_actual.copy()
+        if 'Costo_Real' in df_mostrar.columns:
+            df_mostrar = df_mostrar.rename(columns={'Costo_Real': 'Costo Estándar (S/)'})
+        st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
+    else:
+        st.warning("⚠️ No hay una lista de precios cargada. Descarga el molde y súbelo.")
+    
+    st.markdown("---")
+    with st.expander("📥 Descargar Molde de Excel en Blanco"):
+        df_molde = pd.DataFrame(columns=['Codigo_SKU', 'Nombre_Insumo', 'Moneda', 'Costo_Real', 'Costo_Estandar_Soles', 'Precio_Venta_Publico'])
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df_molde.to_excel(writer, index=False, sheet_name='Precios')
+        st.download_button("Descargar Plantilla", data=output.getvalue(), file_name="Molde_Precios_Quimaroma.xlsx", mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 elif menu == "📊 Inicio (Dashboard)":
     st.title("📊 Panel de Control Principal")
