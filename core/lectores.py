@@ -23,7 +23,7 @@ FIRMAS = {
 
 NOMBRES = {
     "facel_detallado": "Reporte detallado de FACEL (Aquaz)",
-    "quimaroma": "Reporte de ventas de la tienda Quimaroma",
+    "quimaroma": "Reporte de Ventas Detallado de Quimaroma",
     "facel_resumido": "Reporte resumido de FACEL",
 }
 
@@ -191,7 +191,7 @@ def _procesar_facel(hojas: list, df_costos: pd.DataFrame) -> dict:
             "hojas": [h for h, _ in hojas], "avisos": avisos}
 
 
-def combinar_facel(actual: pd.DataFrame, nuevo: pd.DataFrame):
+def combinar_por_comprobante(actual: pd.DataFrame, nuevo: pd.DataFrame):
     """
     Une un reporte nuevo de FACEL con lo que ya está guardado, sin borrar lo demás.
 
@@ -211,35 +211,76 @@ def combinar_facel(actual: pd.DataFrame, nuevo: pd.DataFrame):
 
 
 # ==========================================
-# TIENDA QUIMAROMA
+# TIENDA QUIMAROMA ("Reporte de Ventas Detallado")
 # ==========================================
+MONEDAS = {"SOLES": "PEN", "PEN": "PEN", "DOLARES AMERICANOS": "USD", "DOLARES": "USD", "USD": "USD"}
+
+
 def _procesar_quimaroma(hojas: list, df_costos: pd.DataFrame) -> dict:
     b = pd.concat([df for _, df in hojas], ignore_index=True)
     col = lambda c: b[c] if c in b.columns else pd.Series([None] * len(b), index=b.index)
+    texto = lambda c, defecto="": col(c).fillna(defecto).astype(str).str.strip().replace({"nan": defecto, "-": defecto})
+
+    b = b[texto("SERIE") != ""].copy()
+    col = lambda c: b[c] if c in b.columns else pd.Series([None] * len(b), index=b.index)
+    texto = lambda c, defecto="": col(c).fillna(defecto).astype(str).str.strip().replace({"nan": defecto, "-": defecto})
+
+    tipo_comp = texto("COMPROBANTE")
+    es_nc = tipo_comp.map(norm_texto).str.contains("CREDITO")
+    cant = a_numero(col("CANTIDAD DE ITEM")).abs()
+    valor_u = a_numero(col("VALORUNITARIO"))      # sin IGV (en notas de crédito ya viene negativo)
+    precio_u = a_numero(col("PRECIOUNITARIO"))    # con IGV
+    correl = texto("CORRELATIVO").str.replace(r"\.0$", "", regex=True).str.replace(r"\D", "", regex=True)
 
     q = pd.DataFrame(index=b.index)
     q["Fecha"] = parse_fecha(col("FECHAEMISION"))
     q["Empresa"] = "Quimaroma"
-    q["Cliente"] = col("RAZONSOCIAL").fillna("CLIENTES VARIOS").astype(str).str.strip()
-    q["Cliente_Doc"] = ""
+    q["Tipo_Comprobante"] = tipo_comp
+    q["Comprobante"] = texto("SERIE").str.upper() + "-" + correl.str.zfill(8)
+    q["Cliente_Doc"] = col("DOCUMENTORECEPTOR").map(limpiar_doc)
+    q["Cliente"] = texto("RAZONSOCIAL", "CLIENTES VARIOS").replace({"": "CLIENTES VARIOS"})
+    q["Placa"] = texto("PLACA").str.upper()
     q["Vendedor"] = "MOSTRADOR"
-    q["Producto"] = col("DESCRIPCIONITEM").fillna("SIN NOMBRE").astype(str).str.strip()
-    q["Cantidad"] = a_numero(col("CANTIDAD DE ITEM"))
-    q["Precio_Venta"] = a_numero(col("PRECIOUNITARIO"))
+    q["Codigo"] = texto("CODIGOITEM")
+    q["Producto"] = texto("DESCRIPCIONITEM", "SIN NOMBRE").replace({"": "SIN NOMBRE"})
+    q["Categoria"] = texto("FAMILIA").replace({"SIN FAMILIA": ""})
+    q["Moneda"] = texto("MONEDA", "SOLES").map(lambda m: MONEDAS.get(norm_texto(m), norm_texto(m) or "PEN"))
+    q["Gratuito"] = False
+    q["Cantidad"] = cant.where(~es_nc, -cant)     # devoluciones restan unidades
+    q["Precio_Venta"] = valor_u.abs()
+    q["Precio_Con_IGV"] = precio_u.abs()
     q["Descuento"] = a_numero(col("DESCUENTOITEM"))
+    signo = es_nc.map({True: -1.0, False: 1.0})
+    q["Venta_Neta"] = (cant * valor_u.abs() - q["Descuento"]) * signo
+    q["Total_Linea"] = cant * precio_u.abs() * signo
+    q["IGV"] = q["Total_Linea"] - q["Venta_Neta"]
     q["Zona"] = "Mostrador Tienda"
     costo = cruzar_costos(q, df_costos)
     q["Sin_Costo"] = costo.isna()
     q["Costo_Unitario"] = costo.fillna(0.0)
-    q = q[q["Cantidad"] > 0].reset_index(drop=True)
+    q = q[(q["Cantidad"] != 0) | (q["Total_Linea"] != 0)].reset_index(drop=True)
 
     avisos = []
+    n_comp = q["Comprobante"].nunique()
     if q["Fecha"].notna().any():
-        avisos.append(("info", f"{len(q)} líneas del {q['Fecha'].min():%d/%m/%Y} al {q['Fecha'].max():%d/%m/%Y}."))
+        avisos.append(("info", f"{len(q)} líneas de {n_comp} comprobantes, del "
+                               f"{q['Fecha'].min():%d/%m/%Y} al {q['Fecha'].max():%d/%m/%Y}."))
     if q["Fecha"].isna().any():
         avisos.append(("warning", f"{q['Fecha'].isna().sum()} líneas sin fecha válida."))
+    nc = q[q["Tipo_Comprobante"].map(norm_texto).str.contains("CREDITO")]
+    if not nc.empty:
+        avisos.append(("info", f"{nc['Comprobante'].nunique()} notas de crédito restan de las ventas y las unidades."))
+    for moneda, grupo in q.groupby("Moneda"):
+        if moneda != "PEN":
+            avisos.append(("warning", f"{len(grupo)} líneas en {moneda} ({grupo['Comprobante'].nunique()} comprobantes, "
+                                      f"{grupo['Venta_Neta'].sum():,.2f} {moneda} sin IGV). Se guardan en su moneda: "
+                                      "en el Explorador filtra por Moneda para no mezclarlas con soles."))
     if q["Sin_Costo"].any():
-        avisos.append(("warning", f"{q.loc[q['Sin_Costo'], 'Producto'].nunique()} productos no están en el "
-                                  "Maestro de Costos: su costo y utilidad quedarán en blanco."))
+        avisos.append(("info", f"{q.loc[q['Sin_Costo'], 'Producto'].nunique()} productos sin costo registrado: "
+                               "su costo y utilidad quedarán en blanco. Todo lo demás funciona normal."))
     return {"tipo": "quimaroma", "nombre": NOMBRES["quimaroma"], "datos": q,
             "hojas": [h for h, _ in hojas], "avisos": avisos}
+
+
+# Nombre anterior, por compatibilidad
+combinar_facel = combinar_por_comprobante

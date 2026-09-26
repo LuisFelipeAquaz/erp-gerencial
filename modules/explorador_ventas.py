@@ -236,6 +236,9 @@ def _indicadores(res: pd.DataFrame):
               help="En blanco si no hay costos cargados." if cob == 0 else f"Calculada sobre el {cob:.0%} de la venta que tiene costo.")
     k5.metric("Comprobantes", f"{ventas['Comprobante_Clave'].nunique():,}")
     k6.metric("Clientes", f"{ventas['Cliente_ID'].nunique():,}")
+    if res["Moneda"].nunique() > 1:
+        st.warning("⚠️ Estos resultados mezclan monedas (" + ", ".join(sorted(res["Moneda"].unique())) + "). "
+                   "Los montos se suman sin convertir: usa 'Más filtros → Moneda' para ver cada una por separado.")
     gratis = res.loc[res["Gratuito"], "Cantidad"].sum()
     devol = -res.loc[res["Es_NC"], "Cantidad"].sum()
     notas = []

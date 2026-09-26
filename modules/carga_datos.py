@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 
 from core.database import guardar_en_nube
-from core.lectores import leer_reporte, combinar_facel
+from core.lectores import leer_reporte, combinar_por_comprobante
 from core.utils import parse_fecha
 
 TABLAS_POR_EMPRESA = {
@@ -46,7 +46,7 @@ def render(empresa_activa, supabase):
 # ==========================================
 def _cargar_ventas(supabase):
     st.markdown("#### Sube tu reporte de ventas")
-    st.caption("Reporte detallado de FACEL (Aquaz) o reporte de la tienda (Quimaroma). "
+    st.caption("Reporte detallado de FACEL (Aquaz) o Reporte de Ventas Detallado (Quimaroma), tal cual lo descargas. "
                "Sirven los dos modelos de FACEL: VENTAS GENERAL o el separado por facturas, boletas y notas. "
                "El ERP reconoce cuál es, agrega lo nuevo y nunca duplica ni borra lo que ya tenías.")
 
@@ -68,33 +68,20 @@ def _cargar_ventas(supabase):
     if nuevo.empty:
         return
 
-    if r["tipo"] == "facel_detallado":
-        tabla = 'Ventas'
-        actual = st.session_state.dfs.get(tabla, pd.DataFrame())
-        if not actual.empty and 'Comprobante' not in actual.columns:
-            st.error("Tienes ventas de Aquaz cargadas con la versión anterior del ERP (con IGV incluido y sin "
-                     "número de comprobante). Para no mezclar cálculos, ve a la pestaña '🗑️ Borrar datos', borra "
-                     "las ventas de Aquaz y vuelve a subir tus reportes de FACEL.")
-            return
-        resultado, n_nuevos, n_actualizados = combinar_facel(actual, nuevo)
-        detalle = f"{n_nuevos} comprobantes nuevos"
-        if n_actualizados:
-            detalle += f" y {n_actualizados} que ya existían (se actualizaron, no se duplicaron)"
-        detalle += f". Total guardado: {resultado['Comprobante'].nunique()} comprobantes"
-
-    else:  # quimaroma: el archivo reemplaza el periodo que cubre
-        tabla = 'Ventas_Quima'
-        actual = st.session_state.dfs.get(tabla, pd.DataFrame())
-        desde, hasta = nuevo['Fecha'].min(), nuevo['Fecha'].max()
-        if not actual.empty and pd.notna(desde):
-            f = pd.to_datetime(actual['Fecha'], errors='coerce')
-            en_periodo = (f >= desde) & (f <= hasta)
-            if en_periodo.any():
-                st.info(f"Se reemplazan {en_periodo.sum()} líneas que ya existían entre "
-                        f"{desde:%d/%m/%Y} y {hasta:%d/%m/%Y}.")
-            actual = actual[~en_periodo]
-        resultado = pd.concat([actual, nuevo], ignore_index=True)
-        detalle = f"{len(nuevo)} líneas guardadas en la nube"
+    tabla = 'Ventas' if r["tipo"] == "facel_detallado" else 'Ventas_Quima'
+    empresa = 'Aquaz' if tabla == 'Ventas' else 'Quimaroma'
+    actual = st.session_state.dfs.get(tabla, pd.DataFrame())
+    if not actual.empty and 'Comprobante' not in actual.columns:
+        st.error(f"Tienes ventas de {empresa} cargadas con la versión anterior del ERP (sin número de comprobante). "
+                 f"Para no duplicarlas, elige {empresa} en la barra lateral, ve a '🗑️ Borrar datos', bórralas una sola "
+                 "vez y vuelve a subir tus reportes.")
+        return
+    # Se SUMA a lo que ya está guardado: solo se actualizan los comprobantes que vienen repetidos
+    resultado, n_nuevos, n_actualizados = combinar_por_comprobante(actual, nuevo)
+    detalle = f"{empresa}: {n_nuevos} comprobantes nuevos"
+    if n_actualizados:
+        detalle += f" y {n_actualizados} que ya existían (se actualizaron, no se duplicaron)"
+    detalle += f". Total guardado: {resultado['Comprobante'].nunique()} comprobantes"
 
     if _guardar(supabase, tabla, resultado):
         st.success(f"✅ {detalle}.")
