@@ -40,6 +40,8 @@ cargar_memoria_nube(supabase)
 # ==========================================
 st.sidebar.title("⚙️ Panel de Control")
 empresa_activa = st.sidebar.selectbox("🏢 ENTORNO DE TRABAJO:", ["Aquaz (Planta/Mayorista)", "Quimaroma (Tienda Fiori)", "Consolidado Grupo"])
+from core.resumen import selector_periodo
+selector_periodo(empresa_activa)
 st.sidebar.markdown("---")
 menu = st.sidebar.radio("Navegación Estratégica", [
     "📊 Inicio (Dashboard)",

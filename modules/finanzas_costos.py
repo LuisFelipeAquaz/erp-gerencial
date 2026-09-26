@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 
 from core.utils import filtrar_empresa, cobertura_costos
+from core.resumen import mostrar_resumen
 
 
 def render(empresa_activa):
@@ -28,7 +29,8 @@ def render(empresa_activa):
     mermas = pd.to_numeric(df_p['Merma_Soles'], errors='coerce').sum() if not df_p.empty and 'Merma_Soles' in df_p.columns else 0
     resultado = ut_bruta - g_fijos - mermas
 
-    st.markdown("### Resumen Consolidado")
+    mostrar_resumen(df_v, clave="finanzas", con_grafico=False)
+    st.markdown("### Resultado")
     st.caption("Utilidad comercial = venta sin IGV − costo de lo vendido (notas de crédito descontadas).")
     c1, c2, c3, c4 = st.columns(4)
     if not hay_costos:

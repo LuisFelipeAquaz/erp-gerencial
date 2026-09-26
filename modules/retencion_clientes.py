@@ -76,7 +76,8 @@ def _excel(df: pd.DataFrame, hoja: str) -> bytes:
 
 def render(empresa_activa):
     st.title("👥 Radar de Retención y Valor de Cliente")
-    df_v = filtrar_empresa(empresa_activa)
+    df_v = filtrar_empresa(empresa_activa, aplicar_periodo=False)  # los días sin comprar se miden con todo el historial
+    st.caption("Esta sección usa siempre todo tu historial de ventas, sin importar el periodo elegido en la barra lateral.")
 
     if df_v.empty:
         st.warning(f"⚠️ No hay datos cargados para {empresa_activa}.")

@@ -13,6 +13,7 @@ import plotly.express as px
 import streamlit as st
 
 from core.utils import convert_to_excel, filtrar_empresa, cobertura_costos, texto_utilidad
+from core.resumen import mostrar_resumen
 
 MIME_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
@@ -177,6 +178,7 @@ def render(empresa_activa):
         st.info("Ninguna venta cumple estos filtros. Prueba con menos palabras o quita algún filtro.")
         return
 
+    mostrar_resumen(res, clave="explorador", con_grafico=False)
     _indicadores(res)
 
     tab_graf, tab_din, tab_det = st.tabs(["📊 Gráficos", "🧮 Tabla dinámica", "📋 Detalle de ventas"])
@@ -226,19 +228,17 @@ def _panel_filtros(df: pd.DataFrame) -> dict:
 
 def _indicadores(res: pd.DataFrame):
     ventas = res[~res["Es_NC"]]
-    k1, k2, k3, k4, k5, k6 = st.columns(6)
+    k1, k4, k5, k6 = st.columns(4)
     k1.metric("Unidades", f"{res['Cantidad'].sum():,.0f}",
               help="Unidades vendidas menos devoluciones (notas de crédito). Incluye bonificaciones.")
-    k2.metric("Venta neta", f"S/ {res['Venta_Neta'].sum():,.2f}", help="Sin IGV, notas de crédito descontadas.")
-    k3.metric("Total con IGV", f"S/ {res['Total_Linea'].sum():,.2f}")
     cob = cobertura_costos(res)
     k4.metric("Utilidad bruta", texto_utilidad(res),
               help="En blanco si no hay costos cargados." if cob == 0 else f"Calculada sobre el {cob:.0%} de la venta que tiene costo.")
     k5.metric("Comprobantes", f"{ventas['Comprobante_Clave'].nunique():,}")
     k6.metric("Clientes", f"{ventas['Cliente_ID'].nunique():,}")
     if res["Moneda"].nunique() > 1:
-        st.warning("⚠️ Estos resultados mezclan monedas (" + ", ".join(sorted(res["Moneda"].unique())) + "). "
-                   "Los montos se suman sin convertir: usa 'Más filtros → Moneda' para ver cada una por separado.")
+        st.caption("ℹ️ En gráficos y tabla dinámica, los montos en soles y dólares se suman juntos: "
+                   "para separarlos usa 'Más filtros → Moneda'. El resumen de arriba ya los separa.")
     gratis = res.loc[res["Gratuito"], "Cantidad"].sum()
     devol = -res.loc[res["Es_NC"], "Cantidad"].sum()
     notas = []

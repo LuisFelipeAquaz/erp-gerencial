@@ -113,6 +113,11 @@ def preparar_ventas(df: pd.DataFrame) -> pd.DataFrame:
 
     if "Comprobante" not in df.columns:
         df["Comprobante"] = ""
+    df["Comprobante"] = df["Comprobante"].fillna("").astype(str)
+    if "Moneda" not in df.columns:
+        df["Moneda"] = "PEN"
+    df["Moneda"] = df["Moneda"].fillna("PEN").astype(str).replace({"": "PEN"})
+    df["Total_Linea"] = a_numero(df["Total_Linea"]) if "Total_Linea" in df.columns else df["Venta_Neta"]
     if "Tipo_Comprobante" not in df.columns:
         df["Tipo_Comprobante"] = ""
     if "Fecha" in df.columns:
@@ -136,8 +141,11 @@ def texto_utilidad(df: pd.DataFrame) -> str:
     return "—"
 
 
-def filtrar_empresa(empresa_activa: str) -> pd.DataFrame:
-    """Ventas de la empresa elegida en la barra lateral (siempre una copia)."""
+def filtrar_empresa(empresa_activa: str, aplicar_periodo: bool = True) -> pd.DataFrame:
+    """
+    Ventas de la empresa elegida en la barra lateral (siempre una copia).
+    Si aplicar_periodo=True, se limita al mes elegido en "📅 PERIODO A REVISAR".
+    """
     df_aquaz = st.session_state.dfs.get("Ventas", pd.DataFrame())
     df_quima = st.session_state.dfs.get("Ventas_Quima", pd.DataFrame())
     if "Aquaz" in empresa_activa:
@@ -146,7 +154,11 @@ def filtrar_empresa(empresa_activa: str) -> pd.DataFrame:
         df = df_quima
     else:
         df = pd.concat([df_aquaz, df_quima], ignore_index=True)
-    return preparar_ventas(df)
+    df = preparar_ventas(df)
+    periodo = st.session_state.get("periodo", "TODO")
+    if aplicar_periodo and periodo != "TODO" and not df.empty and "Fecha" in df.columns:
+        df = df[df["Fecha"].dt.strftime("%Y-%m") == periodo]
+    return df
 
 
 def cruzar_costos(df: pd.DataFrame, df_costos: pd.DataFrame) -> pd.Series:
