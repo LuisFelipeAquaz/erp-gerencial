@@ -12,7 +12,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from core.utils import convert_to_excel, filtrar_empresa
+from core.utils import convert_to_excel, filtrar_empresa, cobertura_costos, texto_utilidad
 
 MIME_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
@@ -90,6 +90,11 @@ def preparar(df: pd.DataFrame) -> pd.DataFrame:
     df["_n_todo"] = _norm_vec(df["_n_prod"] + " " + df["_n_cli"] + " " + df["Tipo_Comprobante"] + " " +
                               df["Vendedor"] + " " + df["Comprobante"].astype(str) + " " + df["Empresa"])
     return df
+
+
+def _medidas(df: pd.DataFrame) -> list:
+    """La utilidad solo se ofrece si hay costos cargados."""
+    return [m for m in MEDIDAS if m != "Utilidad bruta" or df["Utilidad_Bruta"].notna().any()]
 
 
 def _coincide(texto_norm: pd.Series, consulta: str) -> pd.Series:
@@ -226,7 +231,9 @@ def _indicadores(res: pd.DataFrame):
               help="Unidades vendidas menos devoluciones (notas de crédito). Incluye bonificaciones.")
     k2.metric("Venta neta", f"S/ {res['Venta_Neta'].sum():,.2f}", help="Sin IGV, notas de crédito descontadas.")
     k3.metric("Total con IGV", f"S/ {res['Total_Linea'].sum():,.2f}")
-    k4.metric("Utilidad bruta", f"S/ {res['Utilidad_Bruta'].sum():,.2f}")
+    cob = cobertura_costos(res)
+    k4.metric("Utilidad bruta", texto_utilidad(res),
+              help="En blanco si no hay costos cargados." if cob == 0 else f"Calculada sobre el {cob:.0%} de la venta que tiene costo.")
     k5.metric("Comprobantes", f"{ventas['Comprobante_Clave'].nunique():,}")
     k6.metric("Clientes", f"{ventas['Cliente_ID'].nunique():,}")
     gratis = res.loc[res["Gratuito"], "Cantidad"].sum()
@@ -244,7 +251,7 @@ def _indicadores(res: pd.DataFrame):
 
 
 def _graficos(res: pd.DataFrame):
-    medida = st.radio("Medir por:", list(MEDIDAS.keys()), horizontal=True, key="g_medida")
+    medida = st.radio("Medir por:", _medidas(res), horizontal=True, key="g_medida")
     col_valor, funcion = MEDIDAS[medida]
     top_n = st.slider("Cuántos mostrar en los rankings", 5, 30, 10, key="g_top")
 
@@ -285,7 +292,7 @@ def _tabla_dinamica(res: pd.DataFrame):
     opciones_col = ["(ninguna)"] + [d for d in dims if d != filas]
     defecto = opciones_col.index("Tipo de comprobante") if "Tipo de comprobante" in opciones_col else 0
     columnas = d2.selectbox("Columnas", opciones_col, index=defecto, key="p_cols")
-    medida = d3.selectbox("Valor", list(MEDIDAS.keys()), key="p_medida")
+    medida = d3.selectbox("Valor", _medidas(res), key="p_medida")
     grafico = d4.selectbox("Gráfico", ["Barras", "Barras apiladas", "Mapa de calor", "Circular", "Líneas"], key="p_graf")
     columnas = None if columnas == "(ninguna)" else columnas
 

@@ -173,9 +173,9 @@ def _procesar_facel(hojas: list, df_costos: pd.DataFrame) -> dict:
                                   f"comprobantes {', '.join(usd['Comprobante'].unique()[:5])}. Se suman sin convertir."))
     sin_costo = v[v["Sin_Costo"] & (v["Cantidad"] > 0)]
     if not sin_costo.empty:
-        avisos.append(("warning", f"{sin_costo['Producto'].nunique()} productos sin costo registrado "
-                                  f"({len(sin_costo)} líneas): su utilidad aparecerá igual a la venta hasta que "
-                                  "los agregues al Maestro de Costos."))
+        avisos.append(("info", f"{sin_costo['Producto'].nunique()} productos sin costo registrado "
+                                  f"({len(sin_costo)} líneas): su costo y utilidad quedarán en blanco. Todo lo demás "
+                                  "(unidades, ventas, clientes, vendedores) funciona normal."))
     # Comprobantes cuyo total no coincide con la suma de sus líneas (líneas faltantes en el reporte)
     tc = b.assign(_tc=a_numero(col("TOTAL COMPROBANTE")), _tl=a_numero(col("TOTAL LINEA")))
     tc = tc[~gratuito].groupby("_comp").agg(total=("_tc", "first"), lineas=("_tl", "sum"))
@@ -240,6 +240,6 @@ def _procesar_quimaroma(hojas: list, df_costos: pd.DataFrame) -> dict:
         avisos.append(("warning", f"{q['Fecha'].isna().sum()} líneas sin fecha válida."))
     if q["Sin_Costo"].any():
         avisos.append(("warning", f"{q.loc[q['Sin_Costo'], 'Producto'].nunique()} productos no están en el "
-                                  "Maestro de Costos: su utilidad aparecerá igual a la venta."))
+                                  "Maestro de Costos: su costo y utilidad quedarán en blanco."))
     return {"tipo": "quimaroma", "nombre": NOMBRES["quimaroma"], "datos": q,
             "hojas": [h for h, _ in hojas], "avisos": avisos}

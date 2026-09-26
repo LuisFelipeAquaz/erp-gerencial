@@ -23,7 +23,7 @@ def construir_base_clientes(df_v: pd.DataFrame) -> pd.DataFrame:
         Vendedor=("Vendedor", lambda s: s.value_counts().index[0]),
         Zona=("Zona", "last"),
         Venta_Neta=("Venta_Neta", "sum"),
-        Utilidad_Total=("Utilidad_Bruta", "sum"),
+        Utilidad_Total=("Utilidad_Bruta", lambda s: s.sum(min_count=1)),  # en blanco si no hay costos
     )
     compras = ventas.groupby("Cliente_ID").agg(
         Primera_Compra=("Fecha", "min"),
@@ -43,7 +43,7 @@ def construir_base_clientes(df_v: pd.DataFrame) -> pd.DataFrame:
     base["Venta_Neta"] = base["Venta_Neta"].round(2)
     base["Utilidad_Total"] = base["Utilidad_Total"].round(2)
     base["Doc"] = base["Doc"].where(base["Tipo_Doc"] != "SIN DOC", "")
-    return base.reset_index(drop=True).sort_values("Utilidad_Total", ascending=False)
+    return base.reset_index(drop=True).sort_values("Venta_Neta", ascending=False)
 
 
 def render(empresa_activa):
@@ -86,7 +86,7 @@ def render(empresa_activa):
         ("🔴 46-60 días", "🔴 En Riesgo", "riesgo", (dias > 45) & (dias <= 60)),
         ("⚫ +60 días", "⚫ Dormidos", "dormidos", dias > 60),
     ]
-    cols = ['Cliente', 'Doc', 'Vendedor', 'Zona', 'Días Sin Comprar', 'Ultima_Compra', 'Compras', 'Utilidad_Total']
+    cols = ['Cliente', 'Doc', 'Vendedor', 'Zona', 'Días Sin Comprar', 'Ultima_Compra', 'Compras', 'Venta_Neta', 'Utilidad_Total']
     cols_base = ['Tipo_Doc', 'Doc', 'Cliente', 'Empresa', 'Placas', 'Vendedor', 'Zona', 'Compras', 'Primera_Compra',
                  'Ultima_Compra', 'Días Sin Comprar', 'Venta_Neta', 'Ticket_Promedio', 'Utilidad_Total']
     cols_base = [c for c in cols_base if c in df_clientes.columns]

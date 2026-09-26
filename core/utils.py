@@ -90,6 +90,13 @@ def preparar_ventas(df: pd.DataFrame) -> pd.DataFrame:
     else:  # datos antiguos
         df["Venta_Neta"] = df["Cantidad"] * df["Precio_Venta"] - df["Descuento"]
 
+    # Sin costo conocido => costo y utilidad EN BLANCO (no se inventa una utilidad = venta)
+    if "Sin_Costo" in df.columns:
+        sin_costo = df["Sin_Costo"].astype("boolean").fillna(False).astype(bool)
+    else:  # datos antiguos: costo 0 significa que no se conocía
+        sin_costo = df["Costo_Unitario"] == 0
+    df["Sin_Costo"] = sin_costo
+    df.loc[sin_costo, "Costo_Unitario"] = float("nan")
     df["Costo_Total"] = df["Cantidad"] * df["Costo_Unitario"]
     df["Utilidad_Bruta"] = df["Venta_Neta"] - df["Costo_Total"]
 
@@ -111,6 +118,22 @@ def preparar_ventas(df: pd.DataFrame) -> pd.DataFrame:
     if "Fecha" in df.columns:
         df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
     return df
+
+
+def cobertura_costos(df: pd.DataFrame) -> float:
+    """Porcentaje (0 a 1) de la venta neta que tiene costo conocido."""
+    if df.empty or "Utilidad_Bruta" not in df.columns:
+        return 0.0
+    ventas = df.loc[df["Venta_Neta"] > 0]
+    total = ventas["Venta_Neta"].sum()
+    return float(ventas.loc[ventas["Utilidad_Bruta"].notna(), "Venta_Neta"].sum() / total) if total else 0.0
+
+
+def texto_utilidad(df: pd.DataFrame) -> str:
+    """Utilidad formateada, o '—' si no hay costos."""
+    if df["Utilidad_Bruta"].notna().any():
+        return f"S/ {df['Utilidad_Bruta'].sum():,.2f}"
+    return "—"
 
 
 def filtrar_empresa(empresa_activa: str) -> pd.DataFrame:
