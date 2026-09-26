@@ -181,13 +181,14 @@ def render(empresa_activa):
     mostrar_resumen(res, clave="explorador", con_grafico=False)
     _indicadores(res)
 
-    tab_graf, tab_din, tab_det = st.tabs(["📊 Gráficos", "🧮 Tabla dinámica", "📋 Detalle de ventas"])
-    with tab_graf:
+    with st.expander("📊 Ver gráficos", expanded=False):
         _graficos(res)
-    with tab_din:
-        _tabla_dinamica(res)
+
+    tab_det, tab_din = st.tabs(["📋 Detalle de ventas", "🧮 Tabla dinámica"])
     with tab_det:
         _detalle(res)
+    with tab_din:
+        _tabla_dinamica(res)
 
 
 def _panel_filtros(df: pd.DataFrame) -> dict:
@@ -304,25 +305,26 @@ def _tabla_dinamica(res: pd.DataFrame):
     st.download_button("📥 Descargar tabla (.xlsx)", data=convert_to_excel(tabla.reset_index(), sheet_name="Dinamica"),
                        file_name=f"dinamica_{filas}_{medida}.xlsx".replace(" ", "_"), mime=MIME_XLSX, key="dl_din")
 
-    top = st.slider("Filas a graficar", 5, 50, 15, key="p_top")
-    datos = tabla.head(top).drop(columns=["TOTAL"], errors="ignore")
-    if columnas:
-        largo = datos.reset_index().melt(id_vars=filas, var_name=columnas, value_name=medida)
-    else:
-        largo = datos.reset_index()
-    color = columnas or None
-    if grafico == "Mapa de calor" and columnas:
-        fig = px.imshow(datos, text_auto=".3s", aspect="auto", color_continuous_scale="Teal")
-    elif grafico == "Circular":
-        base = tabla["TOTAL"] if columnas else tabla[medida]
-        fig = px.pie(base.head(top).reset_index(), names=filas, values=base.name, hole=0.4)
-    elif grafico == "Líneas":
-        fig = px.line(largo, x=filas, y=medida, color=color, markers=True)
-    else:
-        fig = px.bar(largo, x=filas, y=medida, color=color,
-                     barmode="stack" if grafico == "Barras apiladas" else "group", text_auto=".3s")
-    fig.update_layout(height=520, legend_title_text="")
-    st.plotly_chart(fig, use_container_width=True)
+    with st.expander("📊 Ver gráfico de esta tabla", expanded=False):
+        top = st.slider("Filas a graficar", 5, 50, 15, key="p_top")
+        datos = tabla.head(top).drop(columns=["TOTAL"], errors="ignore")
+        if columnas:
+            largo = datos.reset_index().melt(id_vars=filas, var_name=columnas, value_name=medida)
+        else:
+            largo = datos.reset_index()
+        color = columnas or None
+        if grafico == "Mapa de calor" and columnas:
+            fig = px.imshow(datos, text_auto=".3s", aspect="auto", color_continuous_scale="Teal")
+        elif grafico == "Circular":
+            base = tabla["TOTAL"] if columnas else tabla[medida]
+            fig = px.pie(base.head(top).reset_index(), names=filas, values=base.name, hole=0.4)
+        elif grafico == "Líneas":
+            fig = px.line(largo, x=filas, y=medida, color=color, markers=True)
+        else:
+            fig = px.bar(largo, x=filas, y=medida, color=color,
+                         barmode="stack" if grafico == "Barras apiladas" else "group", text_auto=".3s")
+        fig.update_layout(height=520, legend_title_text="")
+        st.plotly_chart(fig, use_container_width=True)
 
 
 def _detalle(res: pd.DataFrame):

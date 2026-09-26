@@ -114,7 +114,8 @@ def mostrar_resumen(df: pd.DataFrame, clave: str = "res", con_grafico: bool = Tr
         c1, c2 = st.columns([1, 3])
         c1.download_button("📥 Descargar resumen (.xlsx)", data=convert_to_excel(tabla, sheet_name="Resumen mensual"),
                            file_name="resumen_ventas_por_mes.xlsx", mime=MIME_XLSX, key=f"dl_resumen_{clave}")
-        if con_grafico and len(tabla) > 2:
+    if con_grafico and len(tabla) > 2:
+        with st.expander("📊 Ver gráfico por mes", expanded=False):
             graf = tabla[tabla["Mes"] != "TOTAL"].melt(id_vars="Mes", value_vars=[c for c in tabla.columns if "con IGV" in c],
                                                         var_name="Moneda", value_name="Venta con IGV")
             fig = px.bar(graf, x="Mes", y="Venta con IGV", color="Moneda", barmode="group", text_auto=",.0f",
