@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 from core.utils import convert_to_excel, filtrar_empresa, cobertura_costos, texto_utilidad
 from core.resumen import mostrar_resumen
+from modules import productos_vendidos
 
 
 def render(empresa_activa):
@@ -15,6 +16,9 @@ def render(empresa_activa):
     else:
         mostrar_resumen(df, clave="analitica")
         st.markdown("---")
+        productos_vendidos.render(df)
+        st.markdown("---")
+        st.subheader("📈 Vendedores y clientes")
         # Los gráficos se hacen en una sola moneda para no mezclar soles con dólares
         monedas = [m for m in ["PEN", "USD"] if (df["Moneda"] == m).any()]
         if len(monedas) > 1:

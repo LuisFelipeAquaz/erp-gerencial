@@ -31,6 +31,7 @@ DIMENSIONES = {
     "Día de la semana": "Dia_Semana",
     "Tipo de documento": "Tipo_Doc",
     "Placa": "Placa",
+    "Zona": "Zona",
     "Moneda": "Moneda",
 }
 
@@ -135,7 +136,7 @@ def aplicar_filtros(df: pd.DataFrame, f: dict) -> pd.DataFrame:
     m &= _coincide(df["_n_todo"], f.get("general"))
     for clave, col in [("clientes", "Cliente_Etiqueta"), ("tipos", "Tipo_Comprobante"), ("categorias", "Categoria"),
                        ("vendedores", "Vendedor"), ("empresas", "Empresa"), ("productos", "Producto"),
-                       ("tipos_doc", "Tipo_Doc"), ("monedas", "Moneda")]:
+                       ("tipos_doc", "Tipo_Doc"), ("monedas", "Moneda"), ("zonas", "Zona")]:
         if f.get(clave):
             m &= df[col].isin(f[clave])
     if not f.get("incluir_nc", True):
