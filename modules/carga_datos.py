@@ -47,7 +47,7 @@ def render(empresa_activa, supabase):
 def _cargar_ventas(supabase):
     st.markdown("#### Sube tu reporte de ventas")
     st.caption("Reporte detallado de FACEL (Aquaz) o Reporte de Ventas Detallado (Quimaroma), tal cual lo descargas. "
-               "Sirven los dos modelos de FACEL: VENTAS GENERAL o el separado por facturas, boletas y notas. "
+               "De FACEL sirven el Informe de Ventas y el reporte detallado (VENTAS GENERAL o separado por pestañas). "
                "El ERP reconoce cuál es, agrega lo nuevo y nunca duplica ni borra lo que ya tenías.")
 
     archivo = st.file_uploader("Arrastra aquí el Excel", type=["xlsx", "xls"], key="ventas_unico")
@@ -68,7 +68,7 @@ def _cargar_ventas(supabase):
     if nuevo.empty:
         return
 
-    tabla = 'Ventas' if r["tipo"] == "facel_detallado" else 'Ventas_Quima'
+    tabla = 'Ventas' if r["tipo"] in ("facel_detallado", "facel_resumido") else 'Ventas_Quima'
     empresa = 'Aquaz' if tabla == 'Ventas' else 'Quimaroma'
     actual = st.session_state.dfs.get(tabla, pd.DataFrame())
     if not actual.empty and 'Comprobante' not in actual.columns:

@@ -1,3 +1,5 @@
+import base64
+import gzip
 import io
 
 import pandas as pd
@@ -49,6 +51,8 @@ def cargar_memoria_nube(supabase):
         for fila in respuesta.data:
             nombre = fila['nombre_tabla']
             contenido = fila['contenido']
+            if contenido and contenido.startswith("gz:"):  # tablas grandes se guardan comprimidas
+                contenido = gzip.decompress(base64.b64decode(contenido[3:])).decode("utf-8")
             if contenido and contenido != "[]":
                 # dtype=False: no convertir textos como '000037' o '75770151' en números
                 df = pd.read_json(io.StringIO(contenido), orient='records', dtype=False, convert_dates=False)
@@ -80,6 +84,8 @@ def guardar_en_nube(supabase, nombre_tabla, df) -> bool:
         return False
     try:
         json_str = df.to_json(orient='records', date_format='iso') if not df.empty else "[]"
+        if len(json_str) > 500_000:  # comprimir tablas grandes (ej. años de historial): ~15 veces menos espacio
+            json_str = "gz:" + base64.b64encode(gzip.compress(json_str.encode("utf-8"))).decode("ascii")
         supabase.table('base_datos_erp').upsert(
             {'nombre_tabla': nombre_tabla, 'contenido': json_str}
         ).execute()

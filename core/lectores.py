@@ -10,6 +10,8 @@ Reportes reconocidos:
   - Tienda Quimaroma: FechaEmision, RazonSocial, DescripcionItem, ...
   - FACEL resumido: se reconoce para avisar que no sirve (no trae RUC/DNI).
 """
+import re
+
 import pandas as pd
 
 from core.utils import norm_texto, parse_fecha, a_numero, limpiar_doc, cruzar_costos
@@ -24,7 +26,7 @@ FIRMAS = {
 NOMBRES = {
     "facel_detallado": "Reporte detallado de FACEL (Aquaz)",
     "quimaroma": "Reporte de Ventas Detallado de Quimaroma",
-    "facel_resumido": "Reporte resumido de FACEL",
+    "facel_resumido": "Informe de Ventas de FACEL (Aquaz)",
 }
 
 
@@ -70,13 +72,7 @@ def leer_reporte(archivo, df_costos: pd.DataFrame = None) -> dict:
     if "quimaroma" in encontrados:
         return _procesar_quimaroma(encontrados["quimaroma"], df_costos)
     if "facel_resumido" in encontrados:
-        return {
-            "tipo": "facel_resumido", "nombre": NOMBRES["facel_resumido"], "datos": pd.DataFrame(),
-            "hojas": [h for h, _ in encontrados["facel_resumido"]],
-            "avisos": [("error", "Este es el reporte RESUMIDO de FACEL: no trae RUC/DNI del cliente ni "
-                                 "el detalle por producto. Exporta el reporte DETALLADO (el que tiene las "
-                                 "columnas SERIE, NÚMERO, CLIENTE DOC...) y súbelo aquí.")],
-        }
+        return _procesar_informe(encontrados["facel_resumido"])
     return {
         "tipo": None, "nombre": "Formato no reconocido", "datos": pd.DataFrame(), "hojas": [],
         "avisos": [("error", "No reconocí este archivo. Hojas encontradas: " + ", ".join(map(str, hojas.keys()))
@@ -141,7 +137,11 @@ def _procesar_facel(hojas: list, df_costos: pd.DataFrame) -> dict:
     # VALOR VENTA = venta sin IGV y ya con descuento. Lo gratuito no es ingreso.
     v["Venta_Neta"] = (a_numero(col("VALOR VENTA")) * signo).where(~gratuito, 0.0)
     v["IGV"] = (a_numero(col("IGV")) * signo).where(~gratuito, 0.0)
-    v["Total_Linea"] = (a_numero(col("TOTAL LINEA")) * signo).where(~gratuito, 0.0)
+    # TOTAL con IGV de la línea = VALOR VENTA + IGV. No se usa "TOTAL LINEA" directamente porque en el
+    # modelo VENTAS GENERAL de FACEL esa columna puede repetir montos y duplicar/triplicar las ventas.
+    total_calc = a_numero(col("VALOR VENTA")) + a_numero(col("IGV"))
+    total_facel = a_numero(col("TOTAL LINEA"))
+    v["Total_Linea"] = (total_calc.where(total_calc != 0, total_facel) * signo).where(~gratuito, 0.0)
     v["Zona"] = "No registrada"
 
     # Costo: primero el Maestro de Costos, luego el costo de FACEL si es mayor a 0
@@ -176,6 +176,10 @@ def _procesar_facel(hojas: list, df_costos: pd.DataFrame) -> dict:
         avisos.append(("info", f"{sin_costo['Producto'].nunique()} productos sin costo registrado "
                                   f"({len(sin_costo)} líneas): su costo y utilidad quedarán en blanco. Todo lo demás "
                                   "(unidades, ventas, clientes, vendedores) funciona normal."))
+    no_cuadra = ((total_facel - total_calc).abs() > 0.05) & (total_calc != 0)
+    if no_cuadra.sum() > 0:
+        avisos.append(("info", f"En {int(no_cuadra.sum())} líneas la columna TOTAL LINEA de FACEL no coincide con "
+                               "VALOR VENTA + IGV; se usó VALOR VENTA + IGV para no inflar las ventas."))
     # Comprobantes cuyo total no coincide con la suma de sus líneas (líneas faltantes en el reporte)
     tc = b.assign(_tc=a_numero(col("TOTAL COMPROBANTE")), _tl=a_numero(col("TOTAL LINEA")))
     tc = tc[~gratuito].groupby("_comp").agg(total=("_tc", "first"), lineas=("_tl", "sum"))
@@ -208,6 +212,124 @@ def combinar_por_comprobante(actual: pd.DataFrame, nuevo: pd.DataFrame):
     actualizados = actual.loc[ya_estaban, "Comprobante"].nunique()
     resultado = pd.concat([actual[~ya_estaban], nuevo], ignore_index=True)
     return resultado, len(comps) - actualizados, actualizados
+
+
+# ==========================================
+# FACEL "INFORME DE VENTAS" (una fila por comprobante)
+# ==========================================
+_RE_ITEM = re.compile(r"^(.*\S)\s*\((-?[\d.,]+)\)\s*$")
+
+
+def _items(texto: str, cantidad_total: float):
+    """'DETERGENTE ... (3)\\nSUAVIZANTE ... (1)' -> [(producto, cantidad), ...]"""
+    partes = [p.strip() for p in str(texto or "").replace("\\n", "\n").split("\n") if p.strip()]
+    salida = []
+    for p in partes:
+        m = _RE_ITEM.match(p)
+        if m:
+            try:
+                salida.append((m.group(1).strip(), float(m.group(2).replace(",", ""))))
+                continue
+            except ValueError:
+                pass
+        salida.append((p, None))
+    if not salida:
+        return [("SIN NOMBRE", cantidad_total or 0.0)]
+    if all(q is None for _, q in salida) and len(salida) == 1:
+        return [(salida[0][0], cantidad_total or 0.0)]
+    return [(n, q if q is not None else 0.0) for n, q in salida]
+
+
+def _procesar_informe(hojas: list) -> dict:
+    b = pd.concat([df for _, df in hojas], ignore_index=True)
+    col = lambda c: b[c] if c in b.columns else pd.Series([None] * len(b), index=b.index)
+    ref = col("REFERENCIA").fillna("").astype(str).str.strip()
+    tipo = col("COMPROBANTE").fillna("").astype(str).str.strip()
+    validos = (ref != "") & (ref != "-") & (tipo != "") & (tipo.str.lower() != "nan")
+    avisos = []
+    if (~validos).sum():
+        avisos.append(("info", f"{(~validos).sum()} registros sin comprobante emitido (sin serie-número) no se cargaron."))
+    b = b[validos].copy()
+    col = lambda c: b[c] if c in b.columns else pd.Series([None] * len(b), index=b.index)
+
+    total = a_numero(col("TOTAL"))
+    es_nc = total < 0  # FACEL muestra las notas de crédito como el comprobante original con monto negativo
+    partes = col("REFERENCIA").astype(str).str.strip().str.upper().str.extract(r"^([A-Z0-9]+)-0*(\d+)$")
+    clave = partes[0].fillna("") + "-" + partes[1].fillna("").str.zfill(8)
+    clave = clave.where(partes[0].notna(), col("REFERENCIA").astype(str).str.strip().str.upper())
+    # Solo si la nota de crédito repite el número del comprobante original se le agrega "-NC"
+    choca = clave.duplicated(keep=False)
+    clave = clave.where(~(es_nc & choca), clave + "-NC")
+    fecha = parse_fecha(col("FECHA"))
+    tipo_txt = col("COMPROBANTE").astype(str).str.strip().str.upper()
+    tipo_txt = tipo_txt.where(~es_nc, "NOTA DE CRÉDITO (" + tipo_txt + ")")
+    estado = col("ESTADO PAGO").fillna("").astype(str).str.strip()
+    saldo = a_numero(col("BALANCE"))
+    cant_col = a_numero(col("CANTIDAD"))
+    cliente = col("CLIENTE").fillna("CLIENTES VARIOS").astype(str).str.strip().replace({"": "CLIENTES VARIOS"})
+
+    filas = []
+    for i in b.index:
+        items = _items(b.at[i, "PRODUCTO (CANTIDAD)"] if "PRODUCTO (CANTIDAD)" in b.columns else "", cant_col[i])
+        suma = sum(abs(q) for _, q in items)
+        for n_item, (prod, q) in enumerate(items):
+            peso = abs(q) / suma if suma else 1 / len(items)
+            filas.append((i, n_item, prod, q, total[i] * peso))
+    L = pd.DataFrame(filas, columns=["_i", "_n", "Producto", "Cantidad", "Total_Linea"])
+    v = pd.DataFrame({
+        "Fecha": fecha.reindex(L["_i"]).values,
+        "Empresa": "Aquaz",
+        "Tipo_Comprobante": tipo_txt.reindex(L["_i"]).values,
+        "Comprobante": clave.reindex(L["_i"]).values,
+        "Cliente_Doc": "",
+        "Cliente": cliente.reindex(L["_i"]).values,
+        "Placa": "",
+        "Vendedor": "No registrado",
+        "Codigo": "",
+        "Producto": L["Producto"].values,
+        "Categoria": "",
+        "Moneda": "PEN",
+        "Gratuito": False,
+        "Cantidad": L["Cantidad"].values,
+        "Total_Linea": L["Total_Linea"].round(4).values,
+        "Estado_Pago": estado.reindex(L["_i"]).values,
+        # El saldo es del comprobante: se guarda solo en su primera línea para no sumarlo varias veces
+        "Saldo_Pendiente": [saldo[i] if n == 0 else 0.0 for i, n in zip(L["_i"], L["_n"])],
+        "Zona": "No registrada",
+        "Monto_Estimado": True,
+    })
+    v["Venta_Neta"] = (v["Total_Linea"] / 1.18).round(4)
+    v["IGV"] = v["Total_Linea"] - v["Venta_Neta"]
+    v["Precio_Con_IGV"] = (v["Total_Linea"] / v["Cantidad"].where(v["Cantidad"] != 0)).abs().round(4).fillna(0)
+    v["Precio_Venta"] = (v["Precio_Con_IGV"] / 1.18).round(4)
+    v["Descuento"] = 0.0
+    v["Costo_Unitario"] = 0.0
+    v["Sin_Costo"] = True
+
+    n_comp = v["Comprobante"].nunique()
+    avisos.insert(0, ("info", f"{len(v):,} líneas de {n_comp:,} comprobantes, del "
+                              f"{v['Fecha'].min():%d/%m/%Y} al {v['Fecha'].max():%d/%m/%Y}."))
+    if es_nc.any():
+        avisos.append(("info", f"{int(es_nc.sum())} notas de crédito (montos negativos) restan "
+                               f"S/ {-total[es_nc].sum():,.2f} con IGV."))
+    avisos.append(("warning", "Este informe trae el TOTAL de cada comprobante, pero no el precio de cada producto: "
+                              "el monto por producto se reparte según las cantidades (es aproximado). Los totales por "
+                              "comprobante, cliente, día y mes sí son exactos. Tampoco trae RUC/DNI, vendedor ni moneda: "
+                              "todo se toma en soles y el IGV se calcula como 18%."))
+    dia = fecha.dt.strftime("%Y-%m-%d")
+    grupos = pd.DataFrame({"dia": dia, "cli": cliente, "tot": total.round(2), "tipo": tipo_txt})
+    grupos = grupos[~es_nc.values]
+    g = grupos.groupby(["dia", "cli", "tot"])["tipo"].agg(lambda s: set(s))
+    pares = g[g.map(lambda s: any("NOTA DE VENTA" in t for t in s) and any(("BOLETA" in t) or ("FACTURA" in t) for t in s))]
+    if len(pares):
+        avisos.append(("warning", f"{len(pares)} ventas aparecen dos veces: una nota de venta y una boleta/factura del "
+                                  f"mismo cliente, el mismo día y por el mismo monto (S/ {float(pd.Series(pares.index.get_level_values('tot')).sum()):,.2f}). "
+                                  "Probablemente son notas de venta convertidas a comprobante. Se cargaron tal cual."))
+    deuda = saldo[~es_nc].sum()
+    if deuda:
+        avisos.append(("info", f"Saldo pendiente de cobro en este informe: S/ {deuda:,.2f}."))
+    return {"tipo": "facel_resumido", "nombre": NOMBRES["facel_resumido"], "datos": v,
+            "hojas": [h for h, _ in hojas], "avisos": avisos}
 
 
 # ==========================================
