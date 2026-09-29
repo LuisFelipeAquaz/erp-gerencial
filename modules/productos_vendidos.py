@@ -216,7 +216,7 @@ def render(df_base: pd.DataFrame):
                    "Productos que compró": st.column_config.TextColumn(width="large")}
             st.dataframe(t_cli, use_container_width=True, hide_index=True, column_config=fmt,
                          height=min(560, 40 + 35 * len(t_cli)))
-            st.download_button("📥 Descargar lista de clientes (.xlsx)", data=convert_to_excel(t_cli, "Clientes"),
+            st.download_button("📥 Descargar lista de clientes (.xlsx)", data=convert_to_excel(t_cli, "Clientes", "Clientes que compraron los productos filtrados"),
                                file_name=f"clientes_filtrados_{date.today():%Y-%m-%d}.xlsx", mime=MIME_XLSX,
                                key=K + "dlcli")
     with tab1:

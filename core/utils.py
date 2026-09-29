@@ -189,20 +189,95 @@ def resaltar_stock_critico(fila):
     return [''] * len(fila)
 
 
-@st.cache_data
-def convert_to_excel(df_export, sheet_name='Datos'):
-    """Convierte un DataFrame a bytes de Excel para usar en st.download_button."""
+TITULOS_EXCEL = {
+    "Dinamica": "Tabla dinámica de ventas",
+    "Ventas": "Detalle de ventas",
+    "Productos": "Productos vendidos",
+    "Vendedores": "Ranking de vendedores",
+    "Producto x Vendedor": "Unidades por producto y vendedor",
+    "Producto x Zona": "Unidades por producto y zona",
+    "Resumen mensual": "Resumen de ventas por mes",
+    "Reconquistar": "Clientes a reconquistar",
+    "Retencion": "Retención de clientes",
+    "Top Clientes": "Top clientes",
+}
+
+
+def convert_to_excel(df_export, sheet_name='Datos', titulo=None, periodo=None):
+    """
+    Excel con encabezado: título del reporte, empresa, periodo, fecha de generación y
+    encabezados de columna con formato. Se usa en todos los botones de descarga del ERP.
+    """
+    empresa = str(st.session_state.get("empresa_activa", "") or "")
+    periodo = periodo or str(st.session_state.get("periodo", "TODO") or "TODO")
+    titulo = titulo or TITULOS_EXCEL.get(sheet_name, sheet_name)
+    return _excel_bytes(df_export, sheet_name, titulo, empresa, periodo,
+                        pd.Timestamp.now(tz="America/Lima").strftime("%d/%m/%Y %H:%M"))
+
+
+def _texto_periodo(periodo: str) -> str:
+    if periodo in ("", "TODO"):
+        return "Todo el periodo"
+    if not re.fullmatch(r"\d{4}-\d{2}", periodo):
+        return periodo
+    meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre",
+             "Octubre", "Noviembre", "Diciembre"]
+    try:
+        anio, mes = periodo.split("-")
+        return f"{meses[int(mes) - 1]} {anio}"
+    except (ValueError, IndexError):
+        return periodo
+
+
+@st.cache_data(show_spinner=False)
+def _excel_bytes(df_export, sheet_name, titulo, empresa, periodo, generado):
     output = io.BytesIO()
-    df_export = df_export.copy()
-    for col in df_export.columns:
-        if pd.api.types.is_datetime64_any_dtype(df_export[col]):
-            df_export[col] = df_export[col].dt.strftime("%d/%m/%Y")
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df_export.to_excel(writer, index=False, sheet_name=sheet_name)
-        hoja = writer.sheets[sheet_name]
-        for i, col in enumerate(df_export.columns):
-            # Columnas vacías (ej. utilidad sin costos) no deben romper el cálculo del ancho
-            largos = [len(str(x)) for x in df_export[col] if not (x is None or (isinstance(x, float) and pd.isna(x)))]
-            largo = max(largos) if largos else 0
-            hoja.set_column(i, i, min(max(len(str(col)), largo) + 2, 50))
+    df = df_export.copy()
+    # Índices con nombre (ej. 'Producto' en tablas cruzadas) se vuelven columna; los numéricos se descartan
+    df = df.reset_index() if any(n is not None for n in df.index.names) else df.reset_index(drop=True)
+    df.columns = [str(c) for c in df.columns]
+    hoja_nombre = re.sub(r"[\[\]\:\*\?\/\\\\]", " ", str(sheet_name))[:31] or "Datos"
+    fila_tabla = 5  # filas 0-3: encabezado del reporte; fila 5: nombres de columna
+
+    with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format="dd/mm/yyyy",
+                        date_format="dd/mm/yyyy") as writer:
+        df.to_excel(writer, index=False, sheet_name=hoja_nombre, startrow=fila_tabla)
+        libro = writer.book
+        hoja = writer.sheets[hoja_nombre]
+        n_cols = max(len(df.columns), 1)
+
+        f_titulo = libro.add_format({"bold": True, "font_size": 16, "font_color": "#1F4E5A"})
+        f_info = libro.add_format({"font_size": 10, "font_color": "#44546A"})
+        f_encabezado = libro.add_format({"bold": True, "font_color": "#FFFFFF", "bg_color": "#1F4E5A",
+                                         "border": 1, "border_color": "#BFBFBF", "text_wrap": True,
+                                         "valign": "vcenter", "align": "center"})
+        f_moneda = libro.add_format({"num_format": "#,##0.00"})
+        f_entero = libro.add_format({"num_format": "#,##0"})
+
+        hoja.write(0, 0, titulo.upper(), f_titulo)
+        hoja.write(1, 0, f"Empresa: {empresa or '—'}      Periodo: {_texto_periodo(periodo)}", f_info)
+        hoja.write(2, 0, f"Generado: {generado}      Registros: {len(df):,}", f_info)
+        hoja.write(3, 0, "ERP Gerencial · Holding Aquaz / Quimaroma", f_info)
+
+        for i, col in enumerate(df.columns):
+            hoja.write(fila_tabla, i, col, f_encabezado)
+            serie = df[col]
+            # Ancho según el contenido; columnas vacías no rompen el cálculo
+            largos = [len(str(x)) for x in serie if not (x is None or (isinstance(x, float) and pd.isna(x)))]
+            ancho = min(max(len(col) * 0.9, max(largos) if largos else 0) + 2, 55)
+            if pd.api.types.is_float_dtype(serie):
+                hoja.set_column(i, i, max(ancho, 12), f_moneda)
+            elif pd.api.types.is_integer_dtype(serie):
+                hoja.set_column(i, i, max(ancho, 8), f_entero)
+            elif pd.api.types.is_datetime64_any_dtype(serie):
+                hoja.set_column(i, i, 12)
+            else:
+                hoja.set_column(i, i, ancho)
+        hoja.set_row(fila_tabla, 32)
+        hoja.freeze_panes(fila_tabla + 1, 0)
+        if len(df):
+            hoja.autofilter(fila_tabla, 0, fila_tabla + len(df), n_cols - 1)
+        hoja.set_landscape()
+        hoja.fit_to_pages(1, 0)
+        hoja.repeat_rows(fila_tabla)
     return output.getvalue()

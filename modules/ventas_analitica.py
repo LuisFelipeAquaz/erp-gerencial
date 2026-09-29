@@ -65,7 +65,7 @@ def render(empresa_activa):
             fig1.update_layout(margin=dict(t=20, b=20, l=0, r=0))
             c1.plotly_chart(fig1, use_container_width=True)
             # Botón para descargar el Excel de los Vendedores
-            c1.download_button("📥 Exportar Tabla Vendedores (Excel)", data=convert_to_excel(df_vend), file_name="Rendimiento_Vendedores.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+            c1.download_button("📥 Exportar Tabla Vendedores (Excel)", data=convert_to_excel(df_vend, "Vendedores", "Rendimiento por vendedor"), file_name="Rendimiento_Vendedores.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
             # --- 2. PROCESAMIENTO CLIENTES ---
             df_cli = df.groupby('Cliente_ID').agg(Cliente=('Cliente', 'first'), **{m: (m, 'sum')}).reset_index(drop=True)
@@ -85,7 +85,7 @@ def render(empresa_activa):
             fig2.update_layout(margin=dict(t=20, b=20, l=0, r=0))
             c2.plotly_chart(fig2, use_container_width=True)
             # Botón para descargar el Excel del Top Clientes
-            c2.download_button("📥 Exportar Tabla Clientes (Excel)", data=convert_to_excel(df_cli), file_name="Top_Clientes.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+            c2.download_button("📥 Exportar Tabla Clientes (Excel)", data=convert_to_excel(df_cli, "Top Clientes"), file_name="Top_Clientes.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
             st.info("💡 **Tip Pro:** Si quieres guardar el gráfico como imagen, solo pasa el mouse por encima del dibujo y haz clic en el ícono de la **cámara de fotos** que aparece en la esquina superior derecha.")
 

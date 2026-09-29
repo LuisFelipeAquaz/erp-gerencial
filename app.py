@@ -40,6 +40,7 @@ cargar_memoria_nube(supabase)
 # ==========================================
 st.sidebar.title("⚙️ Panel de Control")
 empresa_activa = st.sidebar.selectbox("🏢 ENTORNO DE TRABAJO:", ["Aquaz (Planta/Mayorista)", "Quimaroma (Tienda Fiori)", "Consolidado Grupo"])
+st.session_state["empresa_activa"] = empresa_activa
 from core.resumen import selector_periodo
 selector_periodo(empresa_activa)
 st.sidebar.markdown("---")

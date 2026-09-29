@@ -111,9 +111,10 @@ COLS_SEGUIMIENTO = ['Cliente', 'Tipo_Doc', 'Doc', 'Empresa', 'Vendedor', 'Placas
                     'Ultima_Compra', 'Venta_Neta', 'Productos_Habituales']
 
 
-def _excel(df: pd.DataFrame, hoja: str, cols_base: list = None) -> bytes:
+def _excel(df: pd.DataFrame, hoja: str, cols_base: list = None, titulo: str = None) -> bytes:
     cols = [c for c in (cols_base or COLS_REPORTE) if c in df.columns]
-    return convert_to_excel(df[cols].rename(columns=NOMBRES_EXCEL), sheet_name=hoja)
+    return convert_to_excel(df[cols].rename(columns=NOMBRES_EXCEL), sheet_name=hoja, titulo=titulo,
+                            periodo="Todo el historial")
 
 
 def render(empresa_activa):
@@ -253,7 +254,8 @@ def render(empresa_activa):
         cols_v = [c for c in cols_v if c in grupo.columns]
         if not grupo.empty:
             rango = f"{int(desde)}-{int(hasta)}" if limitar else f"mas_de_{int(desde)}"
-            st.download_button("📥 Descargar reporte en Excel", data=_excel(grupo, "Reconquistar", cols_v),
+            st.download_button("📥 Descargar reporte en Excel", data=_excel(grupo, "Reconquistar", cols_v,
+                                                                   f"Clientes a reconquistar · sin comprar más de {int(desde)} días"),
                                file_name=f"clientes_reconquistar_{rango}_dias_{hoy}.xlsx", mime=MIME_XLSX,
                                type="primary", key="dl_libre")
         fmt = dict(formato)
@@ -271,7 +273,7 @@ def render(empresa_activa):
             grupo = df_clientes[filtro.fillna(False)].sort_values('Venta_Neta', ascending=False)
             st.subheader(f"{titulo} - Total: {len(grupo)}")
             if not grupo.empty:
-                st.download_button("📥 Descargar (.xlsx)", data=_excel(grupo, 'Retencion'),
+                st.download_button("📥 Descargar (.xlsx)", data=_excel(grupo, 'Retencion', titulo=f"Retención de clientes · {titulo}"),
                                    file_name=f'{archivo}_{vendedor_sel}_{hoy}.xlsx', mime=MIME_XLSX, key=f"dl_{archivo}")
             st.dataframe(grupo[[c for c in COLS_REPORTE if c in grupo.columns]], use_container_width=True,
                          hide_index=True, column_config=formato)
@@ -279,7 +281,7 @@ def render(empresa_activa):
     # ---------- Base completa
     with tabs[-1]:
         st.subheader(f"📋 Base de clientes - Total: {len(df_clientes)}")
-        st.download_button("📥 Descargar base de clientes (.xlsx)", data=_excel(df_clientes, 'Clientes'),
+        st.download_button("📥 Descargar base de clientes (.xlsx)", data=_excel(df_clientes, 'Clientes', titulo="Base completa de clientes"),
                            file_name=f"base_clientes_{hoy}.xlsx", mime=MIME_XLSX, key="dl_base")
         st.dataframe(df_clientes[[c for c in COLS_REPORTE if c in df_clientes.columns]], use_container_width=True,
                      hide_index=True, column_config=formato)
