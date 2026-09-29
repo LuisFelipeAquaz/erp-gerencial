@@ -48,6 +48,49 @@ def tabla_productos(res: pd.DataFrame) -> pd.DataFrame:
     return base.reset_index().sort_values("Unidades", ascending=False)
 
 
+ORDENES_CLIENTES = {
+    "Dejó de comprar hace más tiempo primero (última compra más antigua)": ("Última compra", True),
+    "Compró más recientemente primero": ("Última compra", False),
+    "Más unidades primero": ("Unidades", False),
+    "Más venta primero": ("Venta con IGV (S/)", False),
+    "Más veces que compró primero": ("N° compras", False),
+    "Nombre A-Z": ("Cliente", True),
+}
+
+
+def tabla_clientes(res: pd.DataFrame, df_todo: pd.DataFrame) -> pd.DataFrame:
+    """Quiénes son los clientes que compraron lo filtrado, con su última compra."""
+    ventas = res[res["Venta_Neta"] > 0]
+    if ventas.empty:
+        return pd.DataFrame()
+    base = ventas.groupby("Cliente_ID").agg(
+        Cliente=("Cliente", lambda x: x.value_counts().index[0]),
+        Doc=("Cliente_Doc", "first"),
+        Tipo_Doc=("Tipo_Doc", "first"),
+        Vendedor=("Vendedor", lambda x: x.value_counts().index[0]),
+        Zona=("Zona", "last"),
+        Productos=("Producto", lambda x: ", ".join(sorted(x.unique())[:5])),
+        Primera=("Fecha", "min"),
+        Ultima=("Fecha", "max"),
+        Compras=("Comprobante_Clave", "nunique"),
+    )
+    base["Unidades"] = res.groupby("Cliente_ID")["Cantidad"].sum()
+    pen = res[res["Moneda"] == "PEN"]
+    base["Venta con IGV (S/)"] = pen.groupby("Cliente_ID")["Total_Linea"].sum().reindex(base.index).fillna(0).round(2)
+    hoy = pd.Timestamp.today().normalize()
+    base["Días desde esa compra"] = (hoy - base["Ultima"]).dt.days.astype("Int64")
+    # Última compra de CUALQUIER producto: para saber si dejó solo este producto o dejó de comprar del todo
+    todo = df_todo[df_todo["Venta_Neta"] > 0].groupby("Cliente_ID")["Fecha"].max()
+    base["Última compra de cualquier producto"] = todo.reindex(base.index)
+    base["Doc"] = base["Doc"].where(base["Tipo_Doc"] != "SIN DOC", "")
+    base = base.rename(columns={"Primera": "Primera compra", "Ultima": "Última compra", "Compras": "N° compras",
+                                "Tipo_Doc": "Tipo doc", "Doc": "RUC / DNI", "Productos": "Productos que compró"})
+    cols = ["Cliente", "Tipo doc", "RUC / DNI", "Vendedor", "Zona", "Unidades", "Venta con IGV (S/)", "N° compras",
+            "Primera compra", "Última compra", "Días desde esa compra", "Última compra de cualquier producto",
+            "Productos que compró"]
+    return base.reset_index(drop=True)[cols]
+
+
 def tabla_vendedores(res: pd.DataFrame) -> pd.DataFrame:
     ventas = res[res["Venta_Neta"] > 0]
     base = res.groupby("Vendedor").agg(Unidades=("Cantidad", "sum"))
@@ -68,6 +111,17 @@ def tabla_cruce(res: pd.DataFrame, columna: str) -> pd.DataFrame:
     t = t.sort_values("TOTAL", ascending=False)
     t.loc["TOTAL"] = t.sum()
     return t.round(2)
+
+
+TODOS = "✅ Todos"
+
+
+def _multi(contenedor, etiqueta, opciones, clave):
+    """Selector con opción 'Todos' (marcada por defecto). Si eliges otros, se usan solo esos."""
+    sel = contenedor.multiselect(etiqueta, [TODOS] + sorted(opciones), default=[TODOS], key=K + clave,
+                                 help="Deja '✅ Todos' o elige uno, dos o los que quieras.")
+    elegidos = [x for x in sel if x != TODOS]
+    return elegidos  # vacío = todos
 
 
 def _filtros(df: pd.DataFrame) -> dict:
@@ -93,10 +147,10 @@ def _filtros(df: pd.DataFrame) -> dict:
                                         sorted(df["Producto"].unique()), key=K + "prods")
 
         c4, c5, c6, c7 = st.columns(4)
-        f["vendedores"] = c4.multiselect("🧑‍💼 Vendedor", sorted(df["Vendedor"].unique()), key=K + "vend")
-        f["zonas"] = c5.multiselect("📍 Zona", sorted(df["Zona"].unique()), key=K + "zona")
-        f["tipos"] = c6.multiselect("🧾 Tipo de comprobante", sorted(df["Tipo_Comprobante"].unique()), key=K + "tipo")
-        f["categorias"] = c7.multiselect("🏷️ Categoría", sorted(df["Categoria"].unique()), key=K + "cat")
+        f["vendedores"] = _multi(c4, "🧑‍💼 Vendedor", df["Vendedor"].unique(), "vend")
+        f["zonas"] = _multi(c5, "📍 Zona", df["Zona"].unique(), "zona")
+        f["tipos"] = _multi(c6, "🧾 Tipo de comprobante", df["Tipo_Comprobante"].unique(), "tipo")
+        f["categorias"] = _multi(c7, "🏷️ Categoría", df["Categoria"].unique(), "cat")
         c8, c9 = st.columns([3, 1])
         f["cliente"] = c8.text_input("👤 Cliente contiene (nombre, RUC/DNI o placa)", key=K + "cli")
         f["incluir_nc"] = c9.toggle("Restar devoluciones", value=True, key=K + "nc",
@@ -140,8 +194,31 @@ def render(df_base: pd.DataFrame):
     t_prod = tabla_productos(res)
     t_vend = tabla_vendedores(res)
     formato = {c: st.column_config.NumberColumn(c, format="%.2f") for c in t_prod.columns if "Venta" in c}
-    tab1, tab2, tab3, tab4 = st.tabs(["📦 Por producto", "🧑‍💼 Por vendedor (ranking)",
-                                      "🔀 Producto × Vendedor", "📍 Producto × Zona"])
+    tab1, tab_cli, tab2, tab3, tab4 = st.tabs(["📦 Por producto", "👥 Clientes que compraron",
+                                               "🧑‍💼 Por vendedor (ranking)", "🔀 Producto × Vendedor",
+                                               "📍 Producto × Zona"])
+    with tab_cli:
+        t_cli = tabla_clientes(res, df)
+        if t_cli.empty:
+            st.info("No hay clientes con compras en esta combinación.")
+        else:
+            o1, o2 = st.columns([3, 1])
+            orden = o1.selectbox("Ordenar clientes por", list(ORDENES_CLIENTES.keys()), key=K + "orden")
+            col_orden, asc = ORDENES_CLIENTES[orden]
+            t_cli = t_cli.sort_values(col_orden, ascending=asc, na_position="last")
+            o2.metric("Clientes", f"{len(t_cli):,}")
+            st.caption("'Última compra' es la última vez que compró lo que filtraste. 'Última compra de cualquier "
+                       "producto' te dice si dejó solo ese producto o dejó de comprarte del todo.")
+            fmt = {"Primera compra": st.column_config.DateColumn(format="DD/MM/YYYY"),
+                   "Última compra": st.column_config.DateColumn(format="DD/MM/YYYY"),
+                   "Última compra de cualquier producto": st.column_config.DateColumn(format="DD/MM/YYYY"),
+                   "Venta con IGV (S/)": st.column_config.NumberColumn(format="%.2f"),
+                   "Productos que compró": st.column_config.TextColumn(width="large")}
+            st.dataframe(t_cli, use_container_width=True, hide_index=True, column_config=fmt,
+                         height=min(560, 40 + 35 * len(t_cli)))
+            st.download_button("📥 Descargar lista de clientes (.xlsx)", data=convert_to_excel(t_cli, "Clientes"),
+                               file_name=f"clientes_filtrados_{date.today():%Y-%m-%d}.xlsx", mime=MIME_XLSX,
+                               key=K + "dlcli")
     with tab1:
         st.caption(f"{len(t_prod)} productos · ordenados por unidades vendidas")
         st.dataframe(t_prod, use_container_width=True, hide_index=True, column_config=formato,
