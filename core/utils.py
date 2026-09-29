@@ -201,6 +201,8 @@ def convert_to_excel(df_export, sheet_name='Datos'):
         df_export.to_excel(writer, index=False, sheet_name=sheet_name)
         hoja = writer.sheets[sheet_name]
         for i, col in enumerate(df_export.columns):
-            largo = df_export[col].astype(str).str.len().max() if len(df_export) else 0
-            hoja.set_column(i, i, min(max(len(str(col)), int(largo or 0)) + 2, 50))
+            # Columnas vacías (ej. utilidad sin costos) no deben romper el cálculo del ancho
+            largos = [len(str(x)) for x in df_export[col] if not (x is None or (isinstance(x, float) and pd.isna(x)))]
+            largo = max(largos) if largos else 0
+            hoja.set_column(i, i, min(max(len(str(col)), largo) + 2, 50))
     return output.getvalue()

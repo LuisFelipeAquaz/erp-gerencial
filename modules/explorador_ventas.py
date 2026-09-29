@@ -52,8 +52,9 @@ DIAS = ["1-Lun", "2-Mar", "3-Mié", "4-Jue", "5-Vie", "6-Sáb", "7-Dom"]
 # ==========================================
 def _norm_vec(serie: pd.Series) -> pd.Series:
     """Normaliza texto en bloque: sin tildes, mayúsculas, espacios simples."""
-    return (serie.fillna("").astype(str).str.normalize("NFD")
-            .str.replace(r"[\u0300-\u036f]", "", regex=True)
+    # astype(object): usa el motor de texto de Python (el motor Arrow de pandas 3 no acepta '\\u' en regex)
+    return (serie.fillna("").astype(str).astype(object).str.normalize("NFD")
+            .str.replace("[\u0300-\u036f]", "", regex=True)
             .str.upper().str.replace(r"\s+", " ", regex=True).str.strip())
 
 
