@@ -210,7 +210,7 @@ TITULOS_EXCEL = {
 }
 
 
-def convert_to_excel(df_export, sheet_name='Datos', titulo=None, periodo=None):
+def convert_to_excel(df_export, sheet_name='Datos', titulo=None, periodo=None, detalle=None, numerar=False):
     """
     Excel con encabezado: título del reporte, empresa, periodo, fecha de generación y
     encabezados de columna con formato. Se usa en todos los botones de descarga del ERP.
@@ -219,7 +219,7 @@ def convert_to_excel(df_export, sheet_name='Datos', titulo=None, periodo=None):
     periodo = periodo or str(st.session_state.get("periodo", "TODO") or "TODO")
     titulo = titulo or TITULOS_EXCEL.get(sheet_name, sheet_name)
     return _excel_bytes(df_export, sheet_name, titulo, empresa, periodo,
-                        pd.Timestamp.now(tz="America/Lima").strftime("%d/%m/%Y %H:%M"))
+                        pd.Timestamp.now(tz="America/Lima").strftime("%d/%m/%Y %H:%M"), detalle or "", numerar)
 
 
 def _texto_periodo(periodo: str) -> str:
@@ -237,12 +237,14 @@ def _texto_periodo(periodo: str) -> str:
 
 
 @st.cache_data(show_spinner=False)
-def _excel_bytes(df_export, sheet_name, titulo, empresa, periodo, generado):
+def _excel_bytes(df_export, sheet_name, titulo, empresa, periodo, generado, detalle="", numerar=False):
     output = io.BytesIO()
     df = df_export.copy()
     # Índices con nombre (ej. 'Producto' en tablas cruzadas) se vuelven columna; los numéricos se descartan
     df = df.reset_index() if any(n is not None for n in df.index.names) else df.reset_index(drop=True)
     df.columns = [str(c) for c in df.columns]
+    if numerar and "N°" not in df.columns:
+        df.insert(0, "N°", range(1, len(df) + 1))
     hoja_nombre = re.sub(r"[\[\]\:\*\?\/\\\\]", " ", str(sheet_name))[:31] or "Datos"
     fila_tabla = 5  # filas 0-3: encabezado del reporte; fila 5: nombres de columna
 
@@ -258,13 +260,16 @@ def _excel_bytes(df_export, sheet_name, titulo, empresa, periodo, generado):
         f_encabezado = libro.add_format({"bold": True, "font_color": "#FFFFFF", "bg_color": "#1F4E5A",
                                          "border": 1, "border_color": "#BFBFBF", "text_wrap": True,
                                          "valign": "vcenter", "align": "center"})
-        f_moneda = libro.add_format({"num_format": "#,##0.00"})
-        f_entero = libro.add_format({"num_format": "#,##0"})
+        f_moneda = libro.add_format({"num_format": "#,##0.00", "valign": "top"})
+        f_entero = libro.add_format({"num_format": "#,##0", "valign": "top"})
+        f_texto = libro.add_format({"valign": "top"})
+        f_fecha = libro.add_format({"num_format": "dd/mm/yyyy", "valign": "top", "align": "center"})
+        f_ajustar = libro.add_format({"text_wrap": True, "valign": "top"})
 
         hoja.write(0, 0, titulo.upper(), f_titulo)
         hoja.write(1, 0, f"Empresa: {empresa or '—'}      Periodo: {_texto_periodo(periodo)}", f_info)
         hoja.write(2, 0, f"Generado: {generado}      Registros: {len(df):,}", f_info)
-        hoja.write(3, 0, "ERP Gerencial · Holding Aquaz / Quimaroma", f_info)
+        hoja.write(3, 0, f"Filtros: {detalle}" if detalle else "ERP Gerencial · Holding Aquaz / Quimaroma", f_info)
 
         for i, col in enumerate(df.columns):
             hoja.write(fila_tabla, i, col, f_encabezado)
@@ -277,10 +282,18 @@ def _excel_bytes(df_export, sheet_name, titulo, empresa, periodo, generado):
             elif pd.api.types.is_integer_dtype(serie):
                 hoja.set_column(i, i, max(ancho, 8), f_entero)
             elif pd.api.types.is_datetime64_any_dtype(serie):
-                hoja.set_column(i, i, 12)
+                hoja.set_column(i, i, 12, f_texto)
+                for fila, valor in enumerate(serie, start=fila_tabla + 1):  # reescribe fechas alineadas arriba
+                    if pd.notna(valor):
+                        hoja.write_datetime(fila, i, pd.Timestamp(valor).to_pydatetime(), f_fecha)
+            elif ancho > 38:  # textos largos (productos, nombres): se parten en varias líneas para imprimir
+                hoja.set_column(i, i, 38, f_ajustar)
             else:
-                hoja.set_column(i, i, ancho)
-        hoja.set_row(fila_tabla, 32)
+                hoja.set_column(i, i, ancho, f_texto)
+        hoja.set_row(fila_tabla, 45)
+        hoja.set_paper(9)                      # A4
+        hoja.set_margins(left=0.3, right=0.3, top=0.4, bottom=0.4)
+        hoja.set_footer("&CPágina &P de &N")
         hoja.freeze_panes(fila_tabla + 1, 0)
         if len(df):
             hoja.autofilter(fila_tabla, 0, fila_tabla + len(df), n_cols - 1)

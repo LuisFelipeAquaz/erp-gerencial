@@ -111,10 +111,10 @@ COLS_SEGUIMIENTO = ['Cliente', 'Tipo_Doc', 'Doc', 'Empresa', 'Vendedor', 'Placas
                     'Ultima_Compra', 'Venta_Neta', 'Productos_Habituales']
 
 
-def _excel(df: pd.DataFrame, hoja: str, cols_base: list = None, titulo: str = None) -> bytes:
+def _excel(df: pd.DataFrame, hoja: str, cols_base: list = None, titulo: str = None, detalle: str = None) -> bytes:
     cols = [c for c in (cols_base or COLS_REPORTE) if c in df.columns]
     return convert_to_excel(df[cols].rename(columns=NOMBRES_EXCEL), sheet_name=hoja, titulo=titulo,
-                            periodo="Todo el historial")
+                            periodo="Todo el historial", detalle=detalle, numerar=True)
 
 
 def render(empresa_activa):
@@ -252,12 +252,38 @@ def render(empresa_activa):
 
         cols_v = COLS_SEGUIMIENTO if hay_filtro_prod else COLS_REPORTE
         cols_v = [c for c in cols_v if c in grupo.columns]
-        if not grupo.empty:
-            rango = f"{int(desde)}-{int(hasta)}" if limitar else f"mas_de_{int(desde)}"
-            st.download_button("📥 Descargar reporte en Excel", data=_excel(grupo, "Reconquistar", cols_v,
-                                                                   f"Clientes a reconquistar · sin comprar más de {int(desde)} días"),
+
+        # ---- Botón de Excel (siempre visible; se activa cuando hay clientes)
+        partes = [f"sin comprar {'esos productos ' if hay_filtro_prod and criterio.startswith('Dejó de comprar ESOS') else ''}"
+                  f"más de {int(desde)} días" + (f" y menos de {int(hasta)}" if limitar else "")]
+        if productos:
+            partes.append("productos: " + ", ".join(productos[:6]) + ("…" if len(productos) > 6 else ""))
+        if categorias:
+            partes.append("categorías: " + ", ".join(categorias))
+        if texto_prod.strip():
+            partes.append(f"producto contiene: {texto_prod.strip()}")
+        if vendedor_sel != 'Todos':
+            partes.append(f"vendedor: {vendedor_sel}")
+        if min_compras > 1:
+            partes.append(f"al menos {int(min_compras)} compras")
+        if min_monto > 0:
+            partes.append(f"compras de al menos S/ {min_monto:,.0f}")
+        partes.append(f"orden: {orden.lower()}")
+        detalle = " · ".join(partes)
+        rango = f"{int(desde)}-{int(hasta)}" if limitar else f"mas_de_{int(desde)}"
+        archivo_excel = _excel(grupo, "Reconquistar", cols_v, "Clientes a reconquistar", detalle) if not grupo.empty else b""
+
+        def boton(clave):
+            st.download_button("📥 Exportar a Excel (para imprimir)", data=archivo_excel,
                                file_name=f"clientes_reconquistar_{rango}_dias_{hoy}.xlsx", mime=MIME_XLSX,
-                               type="primary", key="dl_libre")
+                               type="primary", key=clave, disabled=grupo.empty, use_container_width=True)
+
+        boton("dl_libre")
+        if grupo.empty:
+            st.caption("No hay clientes con estos filtros: baja los días o quita algún filtro para activar la descarga.")
+        else:
+            st.caption(f"El Excel sale con encabezado (empresa, fecha y filtros usados), numerado y en el mismo orden "
+                       f"que ves aquí: {orden.lower()}. Listo para imprimir en horizontal.")
         fmt = dict(formato)
         fmt.update({"Ultima_Prod": st.column_config.DateColumn("Última compra de esos productos", format="DD/MM/YYYY"),
                     "Dias_Prod": st.column_config.NumberColumn("Días sin comprar esos productos"),
@@ -266,14 +292,19 @@ def render(empresa_activa):
                     "Venta_Prod": st.column_config.NumberColumn("Compró de esos productos (S/)", format="%.2f"),
                     "Compras_Prod": st.column_config.NumberColumn("Veces que los compró")})
         st.dataframe(grupo[cols_v], use_container_width=True, hide_index=True, column_config=fmt)
+        if len(grupo) > 15:
+            boton("dl_libre_abajo")
 
     # ---------- Tramos fijos
     for tab, (_, titulo, archivo, filtro) in zip(tabs[1:], tramos):
         with tab:
             grupo = df_clientes[filtro.fillna(False)].sort_values('Venta_Neta', ascending=False)
             st.subheader(f"{titulo} - Total: {len(grupo)}")
-            if not grupo.empty:
-                st.download_button("📥 Descargar (.xlsx)", data=_excel(grupo, 'Retencion', titulo=f"Retención de clientes · {titulo}"),
+            if True:
+                st.download_button("📥 Exportar a Excel", disabled=grupo.empty,
+                                   data=_excel(grupo, 'Retencion', titulo=f"Retención de clientes · {titulo}",
+                                               detalle=f"tramo {titulo}" + (f" · vendedor: {vendedor_sel}" if vendedor_sel != 'Todos' else ""))
+                                   if not grupo.empty else b"",
                                    file_name=f'{archivo}_{vendedor_sel}_{hoy}.xlsx', mime=MIME_XLSX, key=f"dl_{archivo}")
             st.dataframe(grupo[[c for c in COLS_REPORTE if c in grupo.columns]], use_container_width=True,
                          hide_index=True, column_config=formato)
