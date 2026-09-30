@@ -180,12 +180,20 @@ def _procesar_facel(hojas: list, df_costos: pd.DataFrame) -> dict:
     if no_cuadra.sum() > 0:
         avisos.append(("info", f"En {int(no_cuadra.sum())} líneas la columna TOTAL LINEA de FACEL no coincide con "
                                "VALOR VENTA + IGV; se usó VALOR VENTA + IGV para no inflar las ventas."))
-    # Comprobantes cuyo total no coincide con la suma de sus líneas (líneas faltantes en el reporte)
-    tc = b.assign(_tc=a_numero(col("TOTAL COMPROBANTE")), _tl=a_numero(col("TOTAL LINEA")))
+    # Control: la suma de líneas calculada por el ERP vs. el TOTAL COMPROBANTE que informa FACEL
+    linea_ok = total_calc.where(total_calc != 0, total_facel)
+    tc = b.assign(_tc=a_numero(col("TOTAL COMPROBANTE")).abs(), _tl=linea_ok.abs())
     tc = tc[~gratuito].groupby("_comp").agg(total=("_tc", "first"), lineas=("_tl", "sum"))
-    descuadre = tc[(tc["total"] > 0) & ((tc["total"] - tc["lineas"]).abs() > 0.05)]
+    tc = tc[tc["total"] > 0]
+    descuadre = tc[(tc["total"] - tc["lineas"]).abs() > 0.05]
+    cuadran = len(tc) - len(descuadre)
+    if len(tc):
+        avisos.append(("success" if descuadre.empty else "info",
+                       f"Control de totales: {cuadran:,} de {len(tc):,} comprobantes suman exactamente su TOTAL "
+                       f"COMPROBANTE de FACEL (S/ {tc['lineas'].sum():,.2f} vs S/ {tc['total'].sum():,.2f})."))
     if not descuadre.empty:
-        avisos.append(("warning", "Comprobantes cuyo total no coincide con sus líneas (revísalos en FACEL): "
+        avisos.append(("warning", f"{len(descuadre)} comprobantes no cuadran con su total en FACEL (puede faltar alguna "
+                                  "línea en el reporte; revísalos allá): "
                                   + ", ".join(f"{c} (total {r.total:,.2f} vs líneas {r.lineas:,.2f})"
                                               for c, r in descuadre.head(5).iterrows())))
 
@@ -199,17 +207,22 @@ def combinar_por_comprobante(actual: pd.DataFrame, nuevo: pd.DataFrame):
     """
     Une un reporte nuevo de FACEL con lo que ya está guardado, sin borrar lo demás.
 
-    La llave es SERIE-NÚMERO: da igual si el comprobante vino en el modelo VENTAS GENERAL
+    La llave es CUENTA + SERIE-NÚMERO (dos cuentas de FACEL pueden repetir numeración): da igual si el comprobante vino en el modelo VENTAS GENERAL
     o en el modelo por hojas (FACTURAS, BOLETAS...). Si ya existía, se reemplaza por la versión
     nueva; si no, se agrega. Todo lo que no viene en el archivo nuevo se queda como estaba.
 
     Devuelve (resultado, n_nuevos, n_actualizados).
     """
-    comps = set(nuevo["Comprobante"].unique())
+    def llave(df):
+        cuenta = df["Cuenta"].fillna("").astype(str) if "Cuenta" in df.columns else pd.Series("", index=df.index)
+        return cuenta + "|" + df["Comprobante"].astype(str)
+
+    comps = set(llave(nuevo).unique())
     if actual is None or actual.empty:
         return nuevo.reset_index(drop=True), len(comps), 0
-    ya_estaban = actual["Comprobante"].isin(comps)
-    actualizados = actual.loc[ya_estaban, "Comprobante"].nunique()
+    llaves = llave(actual)
+    ya_estaban = llaves.isin(comps)
+    actualizados = llaves[ya_estaban].nunique()
     resultado = pd.concat([actual[~ya_estaban], nuevo], ignore_index=True)
     return resultado, len(comps) - actualizados, actualizados
 
@@ -297,6 +310,7 @@ def _procesar_informe(hojas: list) -> dict:
         "Saldo_Pendiente": [saldo[i] if n == 0 else 0.0 for i, n in zip(L["_i"], L["_n"])],
         "Zona": "No registrada",
         "Monto_Estimado": True,
+        "Cuenta": col("FACTURADOR").fillna("").astype(str).str.strip().str.upper().reindex(L["_i"]).values,
     })
     v["Venta_Neta"] = (v["Total_Linea"] / 1.18).round(4)
     v["IGV"] = v["Total_Linea"] - v["Venta_Neta"]

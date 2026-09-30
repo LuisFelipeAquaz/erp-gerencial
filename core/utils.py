@@ -114,6 +114,13 @@ def preparar_ventas(df: pd.DataFrame) -> pd.DataFrame:
     if "Comprobante" not in df.columns:
         df["Comprobante"] = ""
     df["Comprobante"] = df["Comprobante"].fillna("").astype(str)
+    if "Cuenta" not in df.columns:
+        df["Cuenta"] = ""
+    df["Cuenta"] = df["Cuenta"].fillna("").astype(str)
+    if df.loc[df["Comprobante"] != "", "Cuenta"].nunique() > 1:
+        # Dos cuentas de FACEL pueden tener el mismo número (ej. N001-00001677): se identifican por cuenta
+        tiene = (df["Comprobante"] != "") & (df["Cuenta"] != "")
+        df.loc[tiene, "Comprobante"] = df.loc[tiene, "Cuenta"] + " · " + df.loc[tiene, "Comprobante"]
     if "Moneda" not in df.columns:
         df["Moneda"] = "PEN"
     df["Moneda"] = df["Moneda"].fillna("PEN").astype(str).replace({"": "PEN"})

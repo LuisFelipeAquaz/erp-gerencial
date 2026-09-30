@@ -1,3 +1,5 @@
+import io
+
 import streamlit as st
 import pandas as pd
 
@@ -44,6 +46,12 @@ def render(empresa_activa, supabase):
 # ==========================================
 # VENTAS: UNA SOLA ZONA DE CARGA
 # ==========================================
+@st.cache_data(show_spinner=False, max_entries=3)
+def _leer(contenido: bytes, nombre: str, maestro: pd.DataFrame):
+    """Lee el archivo una sola vez aunque la pantalla se actualice (elegir cuenta, presionar botones)."""
+    return leer_reporte(io.BytesIO(contenido), maestro)
+
+
 def _cargar_ventas(supabase):
     st.markdown("#### Sube tu reporte de ventas")
     st.caption("Reporte detallado de FACEL (Aquaz) o Reporte de Ventas Detallado (Quimaroma), tal cual lo descargas. "
@@ -51,11 +59,12 @@ def _cargar_ventas(supabase):
                "El ERP reconoce cuál es, agrega lo nuevo y nunca duplica ni borra lo que ya tenías.")
 
     archivo = st.file_uploader("Arrastra aquí el Excel", type=["xlsx", "xls"], key="ventas_unico")
-    if not archivo or not st.button("Procesar reporte", type="primary", use_container_width=True):
+    if not archivo:
         return
 
     try:
-        r = leer_reporte(archivo, st.session_state.dfs.get('Maestro_Costos', pd.DataFrame()))
+        with st.spinner("Leyendo el archivo..."):
+            r = _leer(archivo.getvalue(), archivo.name, st.session_state.dfs.get('Maestro_Costos', pd.DataFrame()))
     except Exception as e:
         st.error(f"No se pudo leer el archivo: {e}")
         return
@@ -63,25 +72,55 @@ def _cargar_ventas(supabase):
     st.markdown(f"**{r['nombre']}**" + (f" · hojas: {', '.join(r['hojas'])}" if r['hojas'] else ""))
     for nivel, msg in r["avisos"]:
         getattr(st, nivel)(msg)
-
-    nuevo = r["datos"]
+    nuevo = r["datos"].copy()
     if nuevo.empty:
         return
 
     tabla = 'Ventas' if r["tipo"] in ("facel_detallado", "facel_resumido") else 'Ventas_Quima'
     empresa = 'Aquaz' if tabla == 'Ventas' else 'Quimaroma'
     actual = st.session_state.dfs.get(tabla, pd.DataFrame())
-    if not actual.empty and 'Comprobante' not in actual.columns:
-        st.error(f"Tienes ventas de {empresa} cargadas con la versión anterior del ERP (sin número de comprobante). "
-                 f"Para no duplicarlas, elige {empresa} en la barra lateral, ve a '🗑️ Borrar datos', bórralas una sola "
-                 "vez y vuelve a subir tus reportes.")
+
+    # ---- Aquaz puede tener más de una cuenta de FACEL con la misma numeración
+    if tabla == 'Ventas':
+        cuentas_guardadas = actual["Cuenta"] if "Cuenta" in actual.columns else pd.Series(dtype=str)
+        existentes = sorted(c for c in cuentas_guardadas.dropna().astype(str).unique() if c.strip())
+        sugerida = ""
+        if "Cuenta" in nuevo.columns and len(nuevo):
+            sugerida = str(nuevo["Cuenta"].iloc[0] or "").strip()
+        opciones = existentes + ([sugerida] if sugerida and sugerida not in existentes else [])
+        opciones += ["➕ Otra cuenta (escribir nombre)"]
+        st.markdown("##### 🏢 ¿De qué cuenta de FACEL es este reporte?")
+        st.caption("Si tienes dos cuentas (dos RUC o dos locales) pueden repetir números como N001-00001677. "
+                   "Indicar la cuenta evita que una reemplace las ventas de la otra. Usa siempre el mismo nombre "
+                   "para los reportes de una misma cuenta.")
+        elegida = st.selectbox("Cuenta", opciones, index=opciones.index(sugerida) if sugerida in opciones else 0,
+                               key="cuenta_facel", label_visibility="collapsed")
+        if elegida.startswith("➕"):
+            elegida = st.text_input("Nombre de la cuenta (ej.: AQUAZ PLANTA o el RUC)", key="cuenta_nueva").strip().upper()
+            if not elegida:
+                st.info("Escribe el nombre de la cuenta para continuar.")
+                return
+        nuevo["Cuenta"] = elegida
+    else:
+        nuevo["Cuenta"] = ""
+
+    if not st.button("Procesar reporte", type="primary", use_container_width=True):
+        return
+
+    if not actual.empty and ('Comprobante' not in actual.columns or (tabla == 'Ventas' and 'Cuenta' not in actual.columns)):
+        st.error(f"Tienes ventas de {empresa} cargadas con una versión anterior del ERP. Para no mezclarlas, elige "
+                 f"{empresa} en la barra lateral, ve a '🗑️ Borrar datos', bórralas una sola vez y vuelve a subir tus reportes.")
         return
     # Se SUMA a lo que ya está guardado: solo se actualizan los comprobantes que vienen repetidos
     resultado, n_nuevos, n_actualizados = combinar_por_comprobante(actual, nuevo)
     detalle = f"{empresa}: {n_nuevos} comprobantes nuevos"
     if n_actualizados:
         detalle += f" y {n_actualizados} que ya existían (se actualizaron, no se duplicaron)"
-    detalle += f". Total guardado: {resultado['Comprobante'].nunique()} comprobantes"
+    if nuevo["Cuenta"].iloc[0]:
+        detalle += f" en la cuenta {nuevo['Cuenta'].iloc[0]}"
+    total_guardado = (resultado["Cuenta"].fillna("").astype(str) if "Cuenta" in resultado.columns else "") + "|" + \
+        resultado["Comprobante"].astype(str)
+    detalle += f". Total guardado: {total_guardado.nunique():,} comprobantes"
 
     if _guardar(supabase, tabla, resultado):
         st.success(f"✅ {detalle}.")

@@ -32,6 +32,7 @@ DIMENSIONES = {
     "Tipo de documento": "Tipo_Doc",
     "Placa": "Placa",
     "Zona": "Zona",
+    "Cuenta de FACEL": "Cuenta",
     "Moneda": "Moneda",
 }
 
@@ -62,6 +63,7 @@ def _norm_vec(serie: pd.Series) -> pd.Series:
 def preparar(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     for col, defecto in [("Producto", "SIN NOMBRE"), ("Categoria", "Sin categoría"), ("Tipo_Comprobante", "Sin dato"),
+                         ("Cuenta", "Sin cuenta"),
                          ("Placa", ""), ("Moneda", "PEN"), ("Empresa", ""), ("Codigo", "")]:
         if col not in df.columns:
             df[col] = defecto
