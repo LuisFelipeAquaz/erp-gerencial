@@ -94,10 +94,10 @@ def compras_de_productos(df_v: pd.DataFrame, categorias: list, productos: list, 
     return r.reset_index()
 
 
-COLS_REPORTE = ['Cliente', 'Tipo_Doc', 'Doc', 'Empresa', 'Vendedor', 'Placas', 'Días Sin Comprar', 'Ultima_Compra',
-                'Ultimo_Comprobante', 'Primera_Compra', 'Compras', 'Venta_Neta', 'Ticket_Promedio', 'Utilidad_Total',
-                'Productos_Habituales']
-NOMBRES_EXCEL = {'Tipo_Doc': 'Tipo doc', 'Doc': 'RUC / DNI', 'Ultima_Compra': 'Última compra',
+# Formato único para todos los reportes de clientes (pantalla y Excel), pensado para una hoja A4
+COLS_REPORTE = ['Cliente', 'Tipo_Doc', 'Doc', 'Empresa', 'Vendedor', 'Días Sin Comprar', 'Ultima_Compra',
+                'Ultimo_Comprobante', 'Primera_Compra', 'Compras', 'Productos_Habituales']
+NOMBRES_EXCEL = {'Compras': 'N° compras', 'Días Sin Comprar': 'Días sin comprar', 'Tipo_Doc': 'Tipo doc', 'Doc': 'RUC / DNI', 'Ultima_Compra': 'Última compra',
                  'Ultimo_Comprobante': 'Último comprobante', 'Primera_Compra': 'Cliente desde',
                  'Compras': 'N° compras', 'Venta_Neta': 'Compró en total (S/ sin IGV)',
                  'Ticket_Promedio': 'Ticket promedio', 'Utilidad_Total': 'Utilidad',
@@ -105,10 +105,10 @@ NOMBRES_EXCEL = {'Tipo_Doc': 'Tipo doc', 'Doc': 'RUC / DNI', 'Ultima_Compra': '�
                  'Productos_Seguidos': 'Productos elegidos que compraba (unidades)',
                  'Ultima_Prod': 'Última compra de esos productos', 'Dias_Prod': 'Días sin comprar esos productos',
                  'Unidades_Prod': 'Unidades de esos productos', 'Venta_Prod': 'Compró de esos productos (S/ con IGV)',
-                 'Compras_Prod': 'Veces que compró esos productos'}
-COLS_SEGUIMIENTO = ['Cliente', 'Tipo_Doc', 'Doc', 'Empresa', 'Vendedor', 'Placas', 'Dias_Prod', 'Ultima_Prod',
-                    'Productos_Seguidos', 'Unidades_Prod', 'Venta_Prod', 'Compras_Prod', 'Días Sin Comprar',
-                    'Ultima_Compra', 'Venta_Neta', 'Productos_Habituales']
+                 'Compras_Prod': 'N° compras de esos productos'}
+# Mismo formato cuando se hace seguimiento de productos elegidos
+COLS_SEGUIMIENTO = ['Cliente', 'Tipo_Doc', 'Doc', 'Empresa', 'Vendedor', 'Dias_Prod', 'Ultima_Prod',
+                    'Ultimo_Comprobante', 'Primera_Compra', 'Compras_Prod', 'Productos_Seguidos']
 
 
 def _excel(df: pd.DataFrame, hoja: str, cols_base: list = None, titulo: str = None, detalle: str = None) -> bytes:
@@ -151,7 +151,12 @@ def render(empresa_activa):
         st.caption("Los clientes sin RUC/DNI válido (vacío, '-', códigos internos o teléfonos) se agrupan por nombre; "
                    "si el nombre se escribe distinto en otra venta, aparecerán separados.")
 
-    formato = {"Ultima_Compra": st.column_config.DateColumn("Última compra", format="DD/MM/YYYY"),
+    formato = {"Tipo_Doc": st.column_config.TextColumn("Tipo doc"),
+               "Doc": st.column_config.TextColumn("RUC / DNI"),
+               "Días Sin Comprar": st.column_config.NumberColumn("Días sin comprar"),
+               "Ultimo_Comprobante": st.column_config.TextColumn("Último comprobante"),
+               "Compras": st.column_config.NumberColumn("N° compras"),
+               "Ultima_Compra": st.column_config.DateColumn("Última compra", format="DD/MM/YYYY"),
                "Primera_Compra": st.column_config.DateColumn("Cliente desde", format="DD/MM/YYYY"),
                "Venta_Neta": st.column_config.NumberColumn("Compró en total", format="%.2f"),
                "Productos_Habituales": st.column_config.TextColumn("Lo que más compraba", width="large")}
@@ -290,10 +295,8 @@ def render(empresa_activa):
                     "Productos_Seguidos": st.column_config.TextColumn("Productos elegidos que compraba", width="large"),
                     "Unidades_Prod": st.column_config.NumberColumn("Unidades de esos productos"),
                     "Venta_Prod": st.column_config.NumberColumn("Compró de esos productos (S/)", format="%.2f"),
-                    "Compras_Prod": st.column_config.NumberColumn("Veces que los compró")})
+                    "Compras_Prod": st.column_config.NumberColumn("N° compras de esos productos")})
         st.dataframe(grupo[cols_v], use_container_width=True, hide_index=True, column_config=fmt)
-        if len(grupo) > 15:
-            boton("dl_libre_abajo")
 
     # ---------- Tramos fijos
     for tab, (_, titulo, archivo, filtro) in zip(tabs[1:], tramos):
