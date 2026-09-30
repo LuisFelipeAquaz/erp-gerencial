@@ -134,14 +134,11 @@ def _procesar_facel(hojas: list, df_costos: pd.DataFrame) -> dict:
     v["Precio_Venta"] = a_numero(col("PRECIO NETO"))            # sin IGV
     v["Precio_Con_IGV"] = a_numero(col("PRECIO UNITARIO"))
     v["Descuento"] = a_numero(col("DESCUENTO"))
-    # VALOR VENTA = venta sin IGV y ya con descuento. Lo gratuito no es ingreso.
-    v["Venta_Neta"] = (a_numero(col("VALOR VENTA")) * signo).where(~gratuito, 0.0)
-    v["IGV"] = (a_numero(col("IGV")) * signo).where(~gratuito, 0.0)
-    # TOTAL con IGV de la línea = VALOR VENTA + IGV. No se usa "TOTAL LINEA" directamente porque en el
-    # modelo VENTAS GENERAL de FACEL esa columna puede repetir montos y duplicar/triplicar las ventas.
-    total_calc = a_numero(col("VALOR VENTA")) + a_numero(col("IGV"))
-    total_facel = a_numero(col("TOTAL LINEA"))
-    v["Total_Linea"] = (total_calc.where(total_calc != 0, total_facel) * signo).where(~gratuito, 0.0)
+    # Montos: se elige, comprobante por comprobante, la columna de FACEL que cuadra con su TOTAL COMPROBANTE
+    con_igv, sin_igv, control = _montos_cuadrados(b, col, gratuito)
+    v["Total_Linea"] = (con_igv * signo).where(~gratuito, 0.0)
+    v["Venta_Neta"] = (sin_igv * signo).where(~gratuito, 0.0)
+    v["IGV"] = v["Total_Linea"] - v["Venta_Neta"]
     v["Zona"] = "No registrada"
 
     # Costo: primero el Maestro de Costos, luego el costo de FACEL si es mayor a 0
@@ -176,31 +173,85 @@ def _procesar_facel(hojas: list, df_costos: pd.DataFrame) -> dict:
         avisos.append(("info", f"{sin_costo['Producto'].nunique()} productos sin costo registrado "
                                   f"({len(sin_costo)} líneas): su costo y utilidad quedarán en blanco. Todo lo demás "
                                   "(unidades, ventas, clientes, vendedores) funciona normal."))
-    no_cuadra = ((total_facel - total_calc).abs() > 0.05) & (total_calc != 0)
-    if no_cuadra.sum() > 0:
-        avisos.append(("info", f"En {int(no_cuadra.sum())} líneas la columna TOTAL LINEA de FACEL no coincide con "
-                               "VALOR VENTA + IGV; se usó VALOR VENTA + IGV para no inflar las ventas."))
-    # Control: la suma de líneas calculada por el ERP vs. el TOTAL COMPROBANTE que informa FACEL
-    linea_ok = total_calc.where(total_calc != 0, total_facel)
-    tc = b.assign(_tc=a_numero(col("TOTAL COMPROBANTE")).abs(), _tl=linea_ok.abs())
-    tc = tc[~gratuito].groupby("_comp").agg(total=("_tc", "first"), lineas=("_tl", "sum"))
-    tc = tc[tc["total"] > 0]
-    descuadre = tc[(tc["total"] - tc["lineas"]).abs() > 0.05]
-    cuadran = len(tc) - len(descuadre)
-    if len(tc):
-        avisos.append(("success" if descuadre.empty else "info",
-                       f"Control de totales: {cuadran:,} de {len(tc):,} comprobantes suman exactamente su TOTAL "
-                       f"COMPROBANTE de FACEL (S/ {tc['lineas'].sum():,.2f} vs S/ {tc['total'].sum():,.2f})."))
-    if not descuadre.empty:
-        avisos.append(("warning", f"{len(descuadre)} comprobantes no cuadran con su total en FACEL (puede faltar alguna "
-                                  "línea en el reporte; revísalos allá): "
-                                  + ", ".join(f"{c} (total {r.total:,.2f} vs líneas {r.lineas:,.2f})"
-                                              for c, r in descuadre.head(5).iterrows())))
+    avisos.extend(control)
 
     modelo = ("Modelo VENTAS GENERAL (todo en una hoja)" if len(hojas) == 1
               else "Modelo por tipo de comprobante (facturas, boletas, notas...)")
     return {"tipo": "facel_detallado", "nombre": f"{NOMBRES['facel_detallado']} · {modelo}", "datos": v,
             "hojas": [h for h, _ in hojas], "avisos": avisos}
+
+
+def _montos_cuadrados(b: pd.DataFrame, col, gratuito: pd.Series):
+    """
+    FACEL no siempre llena igual sus columnas (a veces VALOR VENTA ya incluye IGV, a veces TOTAL LINEA
+    repite el total del comprobante). Para cada comprobante se prueba qué columna suma exactamente su
+    TOTAL COMPROBANTE y se usa esa. Si ninguna cuadra, se reparten las líneas para que sumen ese total.
+    Devuelve (total con IGV por línea, total sin IGV por línea, avisos) sin signo (positivos).
+    """
+    valor = a_numero(col("VALOR VENTA")).abs()
+    igv = a_numero(col("IGV")).abs()
+    cand = pd.DataFrame({
+        "valor+igv": valor + igv,
+        "valor": valor,
+        "total_linea": a_numero(col("TOTAL LINEA")).abs(),
+        "cant*precio": (a_numero(col("CANTIDAD")).abs() * a_numero(col("PRECIO UNITARIO")).abs()
+                        - a_numero(col("DESCUENTO")).abs()).clip(lower=0),
+    }, index=b.index).where(~gratuito, 0.0)
+    comp = b["_comp"]
+    total_comp = a_numero(col("TOTAL COMPROBANTE")).abs().groupby(comp).first()
+    sumas = cand.groupby(comp).sum()
+    tol = (total_comp * 0.002).clip(lower=0.05)
+
+    elegido = pd.Series("", index=sumas.index)
+    for nombre in cand.columns:
+        ok = (elegido == "") & ((sumas[nombre] - total_comp).abs() <= tol) & (total_comp > 0)
+        elegido[ok] = nombre
+    sin_total = (total_comp <= 0) & (elegido == "")
+    elegido[sin_total] = "valor+igv"                  # FACEL no informa total: se usa valor + IGV
+    ajustar = elegido == ""                           # ninguna columna cuadra: se reparte el total
+
+    por_linea = comp.map(elegido)
+    con = pd.Series(0.0, index=b.index)
+    for nombre in cand.columns:
+        m = por_linea == nombre
+        con[m] = cand.loc[m, nombre]
+    m = comp.map(ajustar).fillna(False).astype(bool)
+    if m.any():
+        base = cand.loc[m, "cant*precio"].where(cand.loc[m, "cant*precio"] > 0, cand.loc[m, "valor+igv"])
+        suma_base = base.groupby(comp[m]).transform("sum")
+        con[m] = (base / suma_base.where(suma_base > 0) * comp[m].map(total_comp)).fillna(0.0)
+    con = con.where(~gratuito, 0.0)
+
+    # Sin IGV según la columna que cuadró:
+    #   valor+igv -> VALOR VENTA ya es sin IGV;  valor -> VALOR VENTA incluía IGV, se le resta el IGV;
+    #   otras / repartido -> con IGV / 1.18 si la línea tiene IGV, o igual si está exonerada
+    sin = pd.Series(con / 1.18, index=b.index).where(igv > 0, con)
+    a = por_linea == "valor+igv"
+    sin[a] = valor[a]
+    bm = (por_linea == "valor") & (igv < con)
+    sin[bm] = con[bm] - igv[bm]
+    sin = sin.where(~gratuito, 0.0)
+
+    # ---- Avisos
+    avisos = []
+    validos = total_comp > 0
+    cuadran = (validos & ~ajustar).sum()
+    avisos.append(("success", f"Control de totales: {int(cuadran):,} de {int(validos.sum()):,} comprobantes cuadran "
+                              f"exactamente con su TOTAL COMPROBANTE de FACEL. Total del reporte: "
+                              f"S/ {con.groupby(comp).sum()[validos].sum():,.2f} (FACEL: S/ {total_comp[validos].sum():,.2f})."))
+    usos = elegido[validos & ~ajustar].value_counts()
+    if usos.get("valor", 0):
+        avisos.append(("info", f"En {int(usos['valor']):,} comprobantes FACEL puso el IGV dentro de VALOR VENTA; "
+                               "se corrigió para no sumarlo dos veces."))
+    if usos.get("total_linea", 0) or usos.get("cant*precio", 0):
+        avisos.append(("info", f"En {int(usos.get('total_linea', 0) + usos.get('cant*precio', 0)):,} comprobantes se "
+                               "usó otra columna de FACEL que sí cuadra con su total."))
+    if ajustar.any():
+        ej = ", ".join(f"{c} (total {total_comp[c]:,.2f} vs líneas {sumas.loc[c, 'valor+igv']:,.2f})"
+                       for c in ajustar[ajustar].index[:5])
+        avisos.append(("warning", f"En {int(ajustar.sum()):,} comprobantes ninguna columna de FACEL cuadraba: se "
+                                  f"repartió su TOTAL COMPROBANTE entre sus líneas. Revísalos en FACEL: {ej}"))
+    return con, sin, avisos
 
 
 def combinar_por_comprobante(actual: pd.DataFrame, nuevo: pd.DataFrame):
