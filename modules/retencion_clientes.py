@@ -129,9 +129,13 @@ def render(empresa_activa):
     df_clientes = construir_base_clientes(df_v)
 
     vendedores = ['Todos'] + sorted(df_clientes['Vendedor'].astype(str).unique())
-    c_f1, c_f2 = st.columns([1, 2])
+    c_f1, c_f2, c_f3 = st.columns([1, 2, 1.3])
     vendedor_sel = c_f1.selectbox("Filtrar por Vendedor:", vendedores)
     buscar = c_f2.text_input("Buscar cliente (nombre, RUC/DNI, placa o producto)")
+    orden_fecha = c_f3.radio("📅 Orden por última compra", ["⬆️ Más antigua primero", "⬇️ Más reciente primero"],
+                             key="ret_orden_fecha",
+                             help="Cambia el orden de todas las listas y de los Excel de esta sección.")
+    fecha_asc = orden_fecha.startswith("⬆️")
     if vendedor_sel != 'Todos':
         df_clientes = df_clientes[df_clientes['Vendedor'] == vendedor_sel]
     if buscar:
@@ -207,12 +211,13 @@ def render(empresa_activa):
         limitar = a2.checkbox("Poner un tope", help="Ej.: entre 30 y 90 días, para no incluir clientes perdidos hace años.")
         hasta = a2.number_input("…y MENOS de (días)", min_value=int(desde) + 1, value=max(int(desde) + 60, 90),
                                 step=5, disabled=not limitar)
-        opciones_orden = ["Lo que compró en total (mayor primero)", "Más días sin comprar primero",
-                          "Menos días sin comprar primero", "Más compras realizadas primero", "Nombre A-Z"]
+        ORDEN_FECHA = "📅 Por fecha de última compra (botón de arriba)"
+        opciones_orden = [ORDEN_FECHA, "Lo que compró en total (mayor primero)",
+                          "Más compras realizadas primero", "Nombre A-Z"]
         if hay_filtro_prod:
-            opciones_orden = ["Lo que compró de esos productos (mayor primero)",
-                              "Más unidades de esos productos primero"] + opciones_orden
-        orden = a3.selectbox("Ordenar por", opciones_orden)
+            opciones_orden = opciones_orden[:1] + ["Lo que compró de esos productos (mayor primero)",
+                                                   "Más unidades de esos productos primero"] + opciones_orden[1:]
+        orden = a3.selectbox("Ordenar por", opciones_orden, index=0)
         a4, a5 = st.columns(2)
         min_compras = a4.number_input("Que hayan comprado al menos (veces)", min_value=1, value=1,
                                       help="Sube este número para ver solo clientes que eran recurrentes.")
@@ -232,11 +237,11 @@ def render(empresa_activa):
             filtro &= dias_eval < hasta
         grupo = base[filtro.fillna(False)].copy()
         grupo["_dias"] = dias_eval[filtro.fillna(False)]
-        columna, asc = {"Lo que compró de esos productos (mayor primero)": ('Venta_Prod', False),
+        col_fecha = 'Ultima_Prod' if (hay_filtro_prod and criterio.startswith("Dejó de comprar ESOS")) else 'Ultima_Compra'
+        columna, asc = {ORDEN_FECHA: (col_fecha, fecha_asc),
+                        "Lo que compró de esos productos (mayor primero)": ('Venta_Prod', False),
                         "Más unidades de esos productos primero": ('Unidades_Prod', False),
                         "Lo que compró en total (mayor primero)": ('Venta_Neta', False),
-                        "Más días sin comprar primero": ('_dias', False),
-                        "Menos días sin comprar primero": ('_dias', True),
                         "Más compras realizadas primero": ('Compras_Prod' if hay_filtro_prod else 'Compras', False),
                         "Nombre A-Z": ('Cliente', True)}[orden]
         grupo = grupo.sort_values(columna, ascending=asc, na_position="last")
@@ -273,7 +278,8 @@ def render(empresa_activa):
             partes.append(f"al menos {int(min_compras)} compras")
         if min_monto > 0:
             partes.append(f"compras de al menos S/ {min_monto:,.0f}")
-        partes.append(f"orden: {orden.lower()}")
+        partes.append("orden: última compra " + ("más antigua primero" if fecha_asc else "más reciente primero")
+                      if orden == ORDEN_FECHA else f"orden: {orden.lower()}")
         detalle = " · ".join(partes)
         rango = f"{int(desde)}-{int(hasta)}" if limitar else f"mas_de_{int(desde)}"
         archivo_excel = _excel(grupo, "Reconquistar", cols_v, "Clientes a reconquistar", detalle) if not grupo.empty else b""
@@ -288,7 +294,7 @@ def render(empresa_activa):
             st.caption("No hay clientes con estos filtros: baja los días o quita algún filtro para activar la descarga.")
         else:
             st.caption(f"El Excel sale con encabezado (empresa, fecha y filtros usados), numerado y en el mismo orden "
-                       f"que ves aquí: {orden.lower()}. Listo para imprimir en horizontal.")
+                       f"que ves aquí. Listo para imprimir en horizontal.")
         fmt = dict(formato)
         fmt.update({"Ultima_Prod": st.column_config.DateColumn("Última compra de esos productos", format="DD/MM/YYYY"),
                     "Dias_Prod": st.column_config.NumberColumn("Días sin comprar esos productos"),
@@ -301,7 +307,8 @@ def render(empresa_activa):
     # ---------- Tramos fijos
     for tab, (_, titulo, archivo, filtro) in zip(tabs[1:], tramos):
         with tab:
-            grupo = df_clientes[filtro.fillna(False)].sort_values('Venta_Neta', ascending=False)
+            grupo = df_clientes[filtro.fillna(False)].sort_values('Ultima_Compra', ascending=fecha_asc,
+                                                                  na_position="last")
             st.subheader(f"{titulo} - Total: {len(grupo)}")
             if True:
                 st.download_button("📥 Exportar a Excel", disabled=grupo.empty,
@@ -314,6 +321,7 @@ def render(empresa_activa):
 
     # ---------- Base completa
     with tabs[-1]:
+        df_clientes = df_clientes.sort_values('Ultima_Compra', ascending=fecha_asc, na_position="last")
         st.subheader(f"📋 Base de clientes - Total: {len(df_clientes)}")
         st.download_button("📥 Descargar base de clientes (.xlsx)", data=_excel(df_clientes, 'Clientes', titulo="Base completa de clientes"),
                            file_name=f"base_clientes_{hoy}.xlsx", mime=MIME_XLSX, key="dl_base")
